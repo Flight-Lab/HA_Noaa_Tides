@@ -1,0 +1,14 @@
+{
+  "domain": "noaa_tides",
+  "name": "NOAA Tides",
+  "version": "0.3.2",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "loggers": ["noaa_tides"],
+  "requirements": ["aiohttp"],
+  "documentation": "https://github.com/Flight-Lab/ha_noaa_tides",
+  "issue_tracker": "https://github.com/Flight-Lab/ha_noaa_tides/issues",
+  "codeowners": ["@Flight-Lab"],
+  "config_flow": true,
+  "dependencies": []
+}
