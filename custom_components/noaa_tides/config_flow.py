@@ -9,7 +9,6 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
 import homeassistant.helpers.config_validation as cv
-import homeassistant.helpers.device_registry as dr
 
 from .api import get_station_products
 from .const import (
@@ -32,8 +31,8 @@ NOAA_API_VALIDATION_URL = (
 NDBC_API_VALIDATION_URL = "https://www.ndbc.noaa.gov/data/realtime2/{}.txt"
 
 
-async def validate_station_id(station_id: str) -> bool:
-    """Validate station ID by checking NOAA API first and then NDBC API if needed."""
+async def identify_station_type(station_id: str) -> str:
+    """Validate station ID and identify station as NOAA or NDBC."""
     async with aiohttp.ClientSession() as session:
         # First, try validating with the NOAA API
         noaa_url = NOAA_API_VALIDATION_URL.format(station_id)
@@ -44,7 +43,7 @@ async def validate_station_id(station_id: str) -> bool:
                     try:
                         data = await response.json()
                         if data.get("stations"):
-                            return True  # Station is valid per NOAA API
+                            return "NOAA"  # Station is valid per NOAA API
                         _LOGGER.warning(
                             f"Station {station_id} found on NOAA but response structure is unexpected: {data}"
                         )
@@ -73,7 +72,7 @@ async def validate_station_id(station_id: str) -> bool:
                 if response.status == 200:
                     text = await response.text()
                     if text and "Error" not in text:
-                        return True  # Station is valid per NDBC API
+                        return "NDBC"  # Station is valid per NDBC API
                     _LOGGER.warning(
                         f"Station {station_id} found on NDBC but response content is unexpected: {text}"
                     )
@@ -90,8 +89,8 @@ async def validate_station_id(station_id: str) -> bool:
                 f"Unexpected error validating station ID {station_id} on NDBC API: {e}"
             )
 
-    # If neither API confirmed the station, return False.
-    return False  # Default to invalid if errors occur
+    # If neither API confirms the station.
+    return "unknown"  # Default to invalid if errors occur
 
 
 class NOAAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -107,9 +106,9 @@ class NOAAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             station_id = user_input[CONF_STATION_ID]
 
-            # Validate station ID
-            is_valid = await validate_station_id(station_id)
-            if not is_valid:
+            # Identify station type
+            station_type = await identify_station_type(station_id)
+            if station_type == "Unknown":
                 errors["station_id"] = "invalid_station_id"
 
             if errors:
@@ -136,7 +135,8 @@ class NOAAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             # Fetch available sensors from the station-specific endpoints
             available_sensors = await get_station_products(station_id)
-            self._user_data = user_input  # store the initial data
+            self._user_data = user_input  # Store the initial data
+            self._user_data["station_type"] = station_type  # Store station type
             if available_sensors:
                 # Proceed to sensor selection step
                 self._available_sensors = available_sensors
