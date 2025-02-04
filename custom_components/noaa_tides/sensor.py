@@ -85,8 +85,7 @@ class NOAATidesSensor(NOAABaseSensor):
         data = self.coordinator.data
         if not data:
             return None
-        tide_time = datetime.fromisoformat(data["next_tide_time"]).strftime("%I:%M %p")
-        tide_time = tide_time.lstrip("0")
+        tide_time = datetime.fromisoformat(data["next_tide_time"]).strftime("%I:%M %p").lstrip("0")
         return f"{data['next_tide_type']} at {tide_time}"
 
     @property
