@@ -10,7 +10,7 @@ from homeassistant.const import CONF_NAME
 import homeassistant.helpers.config_validation as cv
 import homeassistant.helpers.device_registry as dr
 
-from .api import get_station_products
+from .api import get_station_products, async_fetch_ndbc_data
 from .const import (
     CONF_STATION_ID,
     CONF_TIMEZONE,
@@ -71,21 +71,55 @@ class NOAAOptionsFlow(config_entries.OptionsFlow):
     async def _generate_schema(self):
         """Generate schema with default values for options flow."""
         station_id = self._config_entry.data.get(CONF_STATION_ID)
-        # Get available sensors from the station-specific endpoints.
-        available_sensors = await get_station_products(station_id)
-        # if no sensors are available, leave the list empty.
         current_options = self._config_entry.options
-        current_sensors = current_options.get("sensors", available_sensors)
+        station_type = self._config_entry.data.get("station_type", "NOAA")
+
+        if station_type == "NDBC":
+            # Define the default list of sensor keys for NDBC stations.
+            sensor_keys = [
+                "wind_speed",
+                "wind_direction",
+                "wave_height",
+                "water_temp",
+                "air_temp",
+                "barometric_pressure",
+            ]
+            # Try to fetch the latest NDBC data so we can filter out sensors
+            # that are returning "MM" (represented as None in our API function).
+            unit_system = self._config_entry.data.get(CONF_UNIT_SYSTEM, "imperial")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    ndbc_data = await async_fetch_ndbc_data(
+                        session, station_id, unit_system
+                    )
+                # Remove any sensor keys for which the data is missing (i.e. None)
+                sensor_keys = [
+                    key for key in sensor_keys if ndbc_data.get(key) is not None
+                ]
+            except Exception as e:
+                _LOGGER.error("Error fetching NDBC data in options flow: %s", e)
+                # If an error occurs, assume all sensors are available.
+            available_sensor_options = {
+                key: SENSOR_OPTIONS.get(key, key) for key in sensor_keys
+            }
+        else:
+            # For NOAA stations, use the get_station_products routine.
+            available_sensor_keys = await get_station_products(station_id)
+            available_sensor_options = {
+                sensor: SENSOR_OPTIONS[sensor] for sensor in available_sensor_keys
+            }
+
+        current_sensors = current_options.get(
+            "sensors", list(available_sensor_options.keys())
+        )
         timezone_options = ["gmt", "lst", "lst_ldt"]
+
         return vol.Schema(
             {
                 vol.Required(
                     "name", default=self._config_entry.data.get(CONF_NAME, "NOAA Tides")
                 ): cv.string,
-                vol.Required(
-                    "station_id",
-                    default=self._config_entry.data.get(CONF_STATION_ID, ""),
-                ): cv.string,
+                vol.Required("station_id", default=station_id): cv.string,
                 vol.Required(
                     "timezone",
                     default=self._config_entry.data.get(CONF_TIMEZONE, "lst_ldt"),
@@ -95,7 +129,7 @@ class NOAAOptionsFlow(config_entries.OptionsFlow):
                     default=self._config_entry.data.get(CONF_UNIT_SYSTEM, "imperial"),
                 ): vol.In(["imperial", "metric"]),
                 vol.Optional("sensors", default=current_sensors): cv.multi_select(
-                    {sensor: SENSOR_OPTIONS[sensor] for sensor in available_sensors}
+                    available_sensor_options
                 ),
             }
         )
