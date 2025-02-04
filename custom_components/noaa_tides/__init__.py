@@ -21,12 +21,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     station_id = entry.data[CONF_STATION_ID]
     timezone = entry.data[CONF_TIMEZONE]
     unit_system = entry.data[CONF_UNIT_SYSTEM]
+    station_type = entry.data.get("station_type", "NOAA")
 
     # Read sensor configuration from options first (if available) then fallback to data.
     selected_sensors = entry.options.get("sensors", entry.data.get("sensors", []))
 
     # Initialize the data coordinator, which manages API calls, updates, and caching.
-    coordinator = NOAADataCoordinator(hass, station_id, timezone, unit_system)
+    coordinator = NOAADataCoordinator(
+        hass, station_id, timezone, unit_system, station_type
+    )
     # Perform the initial data fetch
     await coordinator.async_config_entry_first_refresh()
 
