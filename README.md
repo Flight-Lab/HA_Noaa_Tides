@@ -18,7 +18,7 @@ To configure the NOAA Tides integration, follow these steps:
 
 Different stations support different features (products/datums/sensors). Available features are automatically pulled from a given station during configuration.
 [Station finder](https://tidesandcurrents.noaa.gov/map/index.html?type=datums).
-<!-- [Buoy finder](https://www.ndbc.noaa.gov/) -->
+<!-- [Buoy finder](https://www.ndbc.noaa.gov/obs.shtml?type=oceans&status=r&pgm=IOOS%20Partners|International%20Partners|Marine%20METAR|NDBC%20Meteorological%2FOcean|NERRS|NOS%2FCO-OPS&op=&ls=n)) -->
 
 ## Sample configuration
 
