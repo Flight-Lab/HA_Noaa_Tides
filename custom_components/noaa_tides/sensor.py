@@ -1,4 +1,4 @@
-"""Sensor for the NOAA Tides and Currents API."""
+"""Sensor for the NOAA Tides and Currents component."""
 
 from datetime import datetime
 import logging
@@ -15,16 +15,41 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    """Set up NOAA Tides sensors from a config entry."""
+    """Set up NOAA or NDBC sensors from a config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    selected_sensors = entry.options.get("sensors") or entry.data.get("sensors") or []
-
-    sensor_class_map = {
-        "tide_state": NOAATidesSensor,
-        "measured_level": NOAAMeasuredLevelSensor,
-        "water_temp": NOAAWaterTempSensor,
-        "air_temp": NOAAAirTempSensor,
-    }
+    station_type = entry.data.get("station_type", "NOAA")
+    if station_type == "NDBC":
+        # If no sensor selection was made, supply a default set for NDBC buoys.
+        selected_sensors = (
+            entry.options.get("sensors")
+            or entry.data.get("sensors")
+            or [
+                "wind_speed",
+                "wind_direction",
+                "wave_height",
+                "water_temp",
+                "air_temp",
+                "barometric_pressure",
+            ]
+        )
+        sensor_class_map = {
+            "wind_speed": NDBCWindSpeedSensor,
+            "wind_direction": NDBCWindDirectionSensor,
+            "wave_height": NDBCWaveHeightSensor,
+            "water_temp": NDBCWaterTempSensor,
+            "air_temp": NDBCAirTempSensor,
+            "barometric_pressure": NDBCBarometricPressureSensor,
+        }
+    else:
+        selected_sensors = (
+            entry.options.get("sensors") or entry.data.get("sensors") or []
+        )
+        sensor_class_map = {
+            "tide_state": NOAATidesSensor,
+            "measured_level": NOAAMeasuredLevelSensor,
+            "water_temp": NOAAWaterTempSensor,
+            "air_temp": NOAAAirTempSensor,
+        }
 
     entities = [
         sensor_class_map[sensor_key](coordinator, entry)
@@ -35,6 +60,9 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities(entities)
 
 
+#
+# --- NOAA sensor classes (unchanged) ---
+#
 class NOAABaseSensor(CoordinatorEntity, SensorEntity):
     """Base representation of a NOAA sensor."""
 
@@ -47,7 +75,7 @@ class NOAABaseSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, self._station_id)},
             name=f"NOAA Station {self._station_id}",
             manufacturer="NOAA",
-            configuration_url="https://tidesandcurrents.noaa.gov/map/index.html?type=datums",
+            configuration_url=f"https://tidesandcurrents.noaa.gov/stationhome.html?id={self._station_id}",
         )
 
     @property
@@ -85,8 +113,11 @@ class NOAATidesSensor(NOAABaseSensor):
         data = self.coordinator.data
         if not data:
             return None
-        tide_time = datetime.fromisoformat(data["next_tide_time"]).strftime("%I:%M %p")
-        tide_time = tide_time.lstrip("0")
+        tide_time = (
+            datetime.fromisoformat(data["next_tide_time"])
+            .strftime("%I:%M %p")
+            .lstrip("0")
+        )
         return f"{data['next_tide_type']} at {tide_time}"
 
     @property
@@ -218,3 +249,151 @@ class NOAAAirTempSensor(NOAABaseSensor):
         if not data:
             return None
         return data.get("air_temperature")
+
+
+#
+# --- New NDBC sensor classes ---
+#
+class NDBCBaseSensor(CoordinatorEntity, SensorEntity):
+    """Base representation of an NDBC sensor."""
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._station_id = entry.data["station_id"]
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._station_id)},
+            name=f"NDBC Station {self._station_id}",
+            manufacturer="NDBC",
+            configuration_url=f"https://www.ndbc.noaa.gov/station_page.php?station={self._station_id}",
+        )
+
+    @property
+    def unique_id(self):
+        return f"{DOMAIN}-{self._station_id}-{self._sensor_type}"
+
+    @property
+    def name(self):
+        return (
+            f"{self._entry.data['name']} {self._sensor_type.replace('_',' ').title()}"
+        )
+
+    @property
+    def available(self):
+        return super().available and self.coordinator.data is not None
+
+
+class NDBCWindSpeedSensor(NDBCBaseSensor):
+    """Sensor for wind speed from NDBC."""
+
+    def __init__(self, coordinator, entry):
+        self._sensor_type = "wind_speed"
+        super().__init__(coordinator, entry)
+        self._attr_icon = "mdi:weather-windy"
+
+    @property
+    def native_value(self):
+        return self.coordinator.data.get("wind_speed")
+
+    @property
+    def native_unit_of_measurement(self):
+        return "mph" if self.coordinator.unit_system.lower() == "imperial" else "m/s"
+
+
+class NDBCWindDirectionSensor(NDBCBaseSensor):
+    """Sensor for wind direction from NDBC."""
+
+    def __init__(self, coordinator, entry):
+        self._sensor_type = "wind_direction"
+        super().__init__(coordinator, entry)
+        self._attr_icon = "mdi:compass-outline"
+
+    @property
+    def native_value(self):
+        return self.coordinator.data.get("wind_direction")
+
+    @property
+    def native_unit_of_measurement(self):
+        return "°"
+
+
+class NDBCWaveHeightSensor(NDBCBaseSensor):
+    """Sensor for wave height from NDBC."""
+
+    def __init__(self, coordinator, entry):
+        self._sensor_type = "wave_height"
+        super().__init__(coordinator, entry)
+        self._attr_icon = "mdi:waves"
+
+    @property
+    def native_value(self):
+        return self.coordinator.data.get("wave_height")
+
+    @property
+    def native_unit_of_measurement(self):
+        return "ft" if self.coordinator.unit_system.lower() == "imperial" else "m"
+
+
+class NDBCWaterTempSensor(NDBCBaseSensor):
+    """Sensor for water temperature from NDBC."""
+
+    def __init__(self, coordinator, entry):
+        self._sensor_type = "water_temp"
+        super().__init__(coordinator, entry)
+        self._attr_icon = "mdi:coolant-temperature"
+        self._attr_device_class = "temperature"
+        self._attr_state_class = "measurement"
+
+    @property
+    def native_value(self):
+        return self.coordinator.data.get("water_temperature")
+
+    @property
+    def native_unit_of_measurement(self):
+        return (
+            UnitOfTemperature.FAHRENHEIT
+            if self.coordinator.unit_system.lower() == "imperial"
+            else UnitOfTemperature.CELSIUS
+        )
+
+
+class NDBCAirTempSensor(NDBCBaseSensor):
+    """Sensor for air temperature from NDBC."""
+
+    def __init__(self, coordinator, entry):
+        self._sensor_type = "air_temp"
+        super().__init__(coordinator, entry)
+        self._attr_icon = "mdi:thermometer"
+        self._attr_device_class = "temperature"
+        self._attr_state_class = "measurement"
+
+    @property
+    def native_value(self):
+        return self.coordinator.data.get("air_temperature")
+
+    @property
+    def native_unit_of_measurement(self):
+        return (
+            UnitOfTemperature.FAHRENHEIT
+            if self.coordinator.unit_system.lower() == "imperial"
+            else UnitOfTemperature.CELSIUS
+        )
+
+
+class NDBCBarometricPressureSensor(NDBCBaseSensor):
+    """Sensor for barometric pressure from NDBC."""
+
+    def __init__(self, coordinator, entry):
+        self._sensor_type = "barometric_pressure"
+        super().__init__(coordinator, entry)
+        self._attr_icon = "mdi:weather-cloudy"
+        self._attr_device_class = "pressure"
+        self._attr_state_class = "measurement"
+
+    @property
+    def native_value(self):
+        return self.coordinator.data.get("barometric_pressure")
+
+    @property
+    def native_unit_of_measurement(self):
+        return "inHg" if self.coordinator.unit_system.lower() == "imperial" else "hPa"
