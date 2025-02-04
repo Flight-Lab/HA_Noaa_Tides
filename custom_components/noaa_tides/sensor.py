@@ -47,7 +47,7 @@ class NOAABaseSensor(CoordinatorEntity, SensorEntity):
             identifiers={(DOMAIN, self._station_id)},
             name=f"NOAA Station {self._station_id}",
             manufacturer="NOAA",
-            configuration_url="https://tidesandcurrents.noaa.gov/map/index.html?type=datums",
+            configuration_url=f"https://tidesandcurrents.noaa.gov/stationhome.html?id={self._station_id}"
         )
 
     @property
