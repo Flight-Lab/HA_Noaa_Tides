@@ -8,7 +8,9 @@ The NOAA Tides custom component provides real-time tidal and environmental data 
 
 ## Sample configuration
 
-(insert images)
+![Configuration step 1](/images/config1.png)
+![Configuration step 2](/images/config2.png)
+![Configuration step 3](/images/config3.png)
 
 
 Different stations support different features (products/datums/sensors). Available features are automatically pulled from a given station during configuration.
@@ -24,3 +26,6 @@ Different stations support different features (products/datums/sensors). Availab
 * **Water Level Sensor:** Reports the current water level relative to the selected station.
 * **Water Temperature Sensor:** Provides real-time water temperature readings.
 * **Air Temperature Sensor:** Reports atmospheric temperature data.
+
+![Device page](/images/device-page.png)
+![Tide state](/images/tide-state.png)
