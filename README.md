@@ -28,4 +28,4 @@ Different stations support different features (products/datums/sensors). Availab
 * **Air Temperature Sensor:** Reports atmospheric temperature data.
 
 ![Device page](/images/devicepage.png)
-![Tide state](/images/tidestate.png)
+![Tide state](/images/tide state.png)
