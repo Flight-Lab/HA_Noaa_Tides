@@ -1,4 +1,4 @@
-"""API interactions and data coordinator for NOAA Tides integration."""
+"""API interactions and data coordinator for NOAA Tides component."""
 
 from datetime import datetime, timedelta
 import logging
@@ -17,7 +17,7 @@ APPLICATION_NAME = "NoaaTidesIntegration"
 async def get_station_products(station_id: str) -> list[str]:
     """Fetch available NOAA products and sensors for the given station.
 
-    This function queries two endpoints:
+    This function is used during config flow to list available NOAA data.
       - The products endpoint (products.json) to determine if "Water Levels" and "Tide Predictions" are available.
       - The sensors endpoint (sensors.json) to check for "Air Temperature" and "Water Temperature" sensors.
 
@@ -195,30 +195,141 @@ async def async_fetch_noaa_data(
     return results
 
 
-class NOAADataCoordinator(DataUpdateCoordinator):
-    """Coordinator to fetch NOAA data periodically and cache it."""
+async def async_fetch_ndbc_data(
+    session: aiohttp.ClientSession,
+    station_id: str,
+    unit_system: str,
+) -> dict[str, Any]:
+    """Fetch data from the NDBC realtime text endpoint and parse sensor values."""
+    url = f"https://www.ndbc.noaa.gov/data/realtime2/{station_id}.txt"
+    try:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                raise UpdateFailed(f"Failed to fetch NDBC data: {resp.status}")
+            text = await resp.text()
+    except Exception as err:
+        _LOGGER.error("Error fetching NDBC data: %s", err)
+        raise UpdateFailed(f"Error fetching NDBC data: {err}") from err
 
-    def __init__(self, hass, station_id, timezone, unit_system):
-        """Initialize the coordinator."""
+    lines = text.splitlines()
+    if not lines:
+        raise UpdateFailed("No data received from NDBC API")
+
+    # Assume the first nonempty line is the header.
+    header = lines[0].strip().split()
+    if header[0].startswith("#"):
+        header[0] = header[0].lstrip("#")
+
+    # Many NDBC realtime files include a header (and sometimes units) then one or more data rows.
+    # Here we try to use the second line if it can be parsed as data;
+    # otherwise we use the last line.
+    data_line = None
+    if len(lines) > 1:
+        try:
+            parts = lines[1].strip().split()
+            float(parts[0])
+            data_line = parts
+        except ValueError:
+            if len(lines) > 2:
+                data_line = lines[2].strip().split()
+        if data_line is None:
+            data_line = lines[-1].strip().split()
+    else:
+        raise UpdateFailed("Insufficient data from NDBC API")
+
+    data_dict = dict(zip(header, data_line))
+
+    timestamp = None
+    if all(key in data_dict for key in ["YY", "MM", "DD", "hh", "mm"]):
+        try:
+            year = int(data_dict["YY"])
+            if year < 100:
+                year += 2000
+            month = int(data_dict["MM"])
+            day = int(data_dict["DD"])
+            hour = int(data_dict["hh"])
+            minute = int(data_dict["mm"])
+            timestamp = datetime(year, month, day, hour, minute)
+        except Exception as e:
+            _LOGGER.error("Error parsing timestamp from NDBC data: %s", e)
+
+    results = {
+        "timestamp": timestamp.isoformat() if timestamp else None,
+        "wind_direction": float(data_dict.get("WDIR", 0))
+        if data_dict.get("WDIR") not in (None, "MM")
+        else None,
+        "wind_speed": float(data_dict.get("WSPD", 0))
+        if data_dict.get("WSPD") not in (None, "MM")
+        else None,
+        "wave_height": float(data_dict.get("WVHT", 0))
+        if data_dict.get("WVHT") not in (None, "MM")
+        else None,
+        "air_temperature": float(data_dict.get("ATMP", 0))
+        if data_dict.get("ATMP") not in (None, "MM")
+        else None,
+        "water_temperature": float(data_dict.get("WTMP", 0))
+        if data_dict.get("WTMP") not in (None, "MM")
+        else None,
+        "barometric_pressure": float(data_dict.get("PRES", 0))
+        if data_dict.get("PRES") not in (None, "MM")
+        else None,
+    }
+
+    # If imperial units are desired, convert some values.
+    if unit_system.lower() == "imperial":
+        if results["wind_speed"] is not None:
+            results["wind_speed"] = round(
+                results["wind_speed"] * 2.23694, 2
+            )  # m/s to mph
+        if results["wave_height"] is not None:
+            results["wave_height"] = round(
+                results["wave_height"] * 3.28084, 2
+            )  # m to ft
+        if results["air_temperature"] is not None:
+            results["air_temperature"] = round(
+                (results["air_temperature"] * 9 / 5) + 32, 2
+            )
+        if results["water_temperature"] is not None:
+            results["water_temperature"] = round(
+                (results["water_temperature"] * 9 / 5) + 32, 2
+            )
+        if results["barometric_pressure"] is not None:
+            results["barometric_pressure"] = round(
+                results["barometric_pressure"] * 0.02953, 2
+            )  # hPa to inHg
+
+    return results
+
+
+class NOAADataCoordinator(DataUpdateCoordinator):
+    """Coordinator to fetch NOAA or NDBC data periodically and cache it."""
+
+    def __init__(self, hass, station_id, timezone, unit_system, station_type="NOAA"):
         self._hass = hass
         self.station_id = station_id
         self.timezone = timezone
         self.unit_system = unit_system
+        self.station_type = station_type
 
         super().__init__(
             hass,
             _LOGGER,
-            name="NOAA Tides Data Coordinator",
+            name="NOAA/NDBC Data Coordinator",
             update_interval=timedelta(minutes=5),
         )
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch data from NOAA and return as a dictionary."""
+        """Fetch data from NOAA or NDBC and return as a dictionary."""
         try:
             async with aiohttp.ClientSession() as session:
-                data = await async_fetch_noaa_data(
-                    session, self.station_id, self.timezone, self.unit_system
-                )
+                if self.station_type == "NDBC":
+                    data = await async_fetch_ndbc_data(
+                        session, self.station_id, self.unit_system
+                    )
+                else:
+                    data = await async_fetch_noaa_data(
+                        session, self.station_id, self.timezone, self.unit_system
+                    )
                 return data
         except Exception as err:
-            raise UpdateFailed(f"Error fetching NOAA data: {err}") from err
+            raise UpdateFailed(f"Error fetching data: {err}") from err
