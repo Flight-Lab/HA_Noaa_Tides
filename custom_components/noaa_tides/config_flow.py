@@ -1,4 +1,4 @@
-"""Config flow for NOAA Tides integration."""
+"""Config flow for NOAA Tides component."""
 
 import logging
 
@@ -9,6 +9,7 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
 import homeassistant.helpers.config_validation as cv
+import homeassistant.helpers.device_registry as dr
 
 from .api import get_station_products
 from .const import (
@@ -25,72 +26,42 @@ from .options_flow import NOAAOptionsFlow
 
 _LOGGER = logging.getLogger(__name__)
 
-NOAA_API_VALIDATION_URL = (
+API_VALIDATION_URL = (
     "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations/{}.json"
 )
-NDBC_API_VALIDATION_URL = "https://www.ndbc.noaa.gov/data/realtime2/{}.txt"
 
 
-async def identify_station_type(station_id: str) -> str:
-    """Validate station ID and identify station as NOAA or NDBC."""
-    async with aiohttp.ClientSession() as session:
-        # First, try validating with the NOAA API
-        noaa_url = NOAA_API_VALIDATION_URL.format(station_id)
-        _LOGGER.debug(f"Validating NOAA Station ID: {station_id} with URL: {noaa_url}")
-        try:
-            async with session.get(noaa_url) as response:
-                if response.status == 200:
-                    try:
-                        data = await response.json()
-                        if data.get("stations"):
-                            return "NOAA"  # Station is valid per NOAA API
-                        _LOGGER.warning(
-                            f"Station {station_id} found on NOAA but response structure is unexpected: {data}"
-                        )
-                    except aiohttp.ContentTypeError:
-                        _LOGGER.error(
-                            f"Invalid JSON response from NOAA API for station {station_id}"
-                        )
-                else:
+async def validate_station_id(station_id: str) -> bool:
+    """Validate NOAA station ID asynchronously."""
+
+    url = API_VALIDATION_URL.format(station_id)  # Correct URL formatting
+    _LOGGER.debug(f"Validating NOAA Station ID: {station_id} with URL: {url}")
+
+    try:
+        async with aiohttp.ClientSession() as session, session.get(url) as response:
+            if response.status == 200:
+                try:
+                    data = await response.json()
+                    if data.get("stations"):
+                        return True  # Station is valid
                     _LOGGER.warning(
-                        f"NOAA API returned {response.status} for station {station_id}"
+                        f"Station {station_id} found, but response structure is unexpected: {data}"
                     )
-        except aiohttp.ClientError as e:
-            _LOGGER.error(
-                f"Network error while validating station ID {station_id} on NOAA API: {e}"
-            )
-        except Exception as e:
-            _LOGGER.error(
-                f"Unexpected error validating station ID {station_id} on NOAA API: {e}"
-            )
+                except aiohttp.ContentTypeError:
+                    _LOGGER.error(
+                        f"Invalid JSON response from NOAA API for station {station_id}"
+                    )
+            else:
+                _LOGGER.warning(
+                    f"NOAA API returned {response.status} for station {station_id}"
+                )
 
-        # NOAA validation failed; now try the NDBC API
-        ndbc_url = NDBC_API_VALIDATION_URL.format(station_id)
-        _LOGGER.debug(f"Validating NDBC Station ID: {station_id} with URL: {ndbc_url}")
-        try:
-            async with session.get(ndbc_url) as response:
-                if response.status == 200:
-                    text = await response.text()
-                    if text and "Error" not in text:
-                        return "NDBC"  # Station is valid per NDBC API
-                    _LOGGER.warning(
-                        f"Station {station_id} found on NDBC but response content is unexpected: {text}"
-                    )
-                else:
-                    _LOGGER.warning(
-                        f"NDBC API returned {response.status} for station {station_id}"
-                    )
-        except aiohttp.ClientError as e:
-            _LOGGER.error(
-                f"Network error while validating station ID {station_id} on NDBC API: {e}"
-            )
-        except Exception as e:
-            _LOGGER.error(
-                f"Unexpected error validating station ID {station_id} on NDBC API: {e}"
-            )
+    except aiohttp.ClientError as e:
+        _LOGGER.error(f"Network error while validating station ID {station_id}: {e}")
+    except Exception as e:
+        _LOGGER.error(f"Unexpected error validating station ID {station_id}: {e}")
 
-    # If neither API confirms the station.
-    return "unknown"  # Default to invalid if errors occur
+    return False  # Default to invalid if errors occur
 
 
 class NOAAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -106,9 +77,9 @@ class NOAAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             station_id = user_input[CONF_STATION_ID]
 
-            # Identify station type
-            station_type = await identify_station_type(station_id)
-            if station_type == "Unknown":
+            # Validate station ID
+            is_valid = await validate_station_id(station_id)
+            if not is_valid:
                 errors["station_id"] = "invalid_station_id"
 
             if errors:
@@ -135,8 +106,7 @@ class NOAAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             # Fetch available sensors from the station-specific endpoints
             available_sensors = await get_station_products(station_id)
-            self._user_data = user_input  # Store the initial data
-            self._user_data["station_type"] = station_type  # Store station type
+            self._user_data = user_input  # store the initial data
             if available_sensors:
                 # Proceed to sensor selection step
                 self._available_sensors = available_sensors
