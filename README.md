@@ -27,5 +27,5 @@ Different stations support different features (products/datums/sensors). Availab
 * **Water Temperature Sensor:** Provides real-time water temperature readings.
 * **Air Temperature Sensor:** Reports atmospheric temperature data.
 
-![Device page](/images/device_page.png)
-![Tide state](/images/tide_state.png)
+![Device page](/images/devicepage.png)
+![Tide state](/images/tidestate.png)
