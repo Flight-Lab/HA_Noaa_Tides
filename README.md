@@ -3,11 +3,12 @@ The NOAA Tides custom component provides real-time tidal and environmental data 
 
 ## Features:
 
-* Automatic Sensor Detection: During setup, the component auto-detects and pulls available sensors based on the selected station ID.
-* Tide State Sensor: Displays the upcoming tide type and time, along with attributes such as previous tide details, tide factor, tide percentage, and predicted tide levels.
-* Water Level Sensor: Reports the current water level relative to the selected station.
-* Water Temperature Sensor: Provides real-time water temperature readings.
-* Air Temperature Sensor: Reports atmospheric temperature data.
+* **Automatic Sensor Detection:** During setup, the component auto-detects and pulls available sensors based on the selected station ID.
+* **Tide State Sensor:** Displays the upcoming tide type and time.
+  * **Attributes:** NOAA predicted tide levels. previous tide details, calculated tide factor & percentage.
+*** Water Level Sensor:** Reports the current water level relative to the selected station.
+* **Water Temperature Sensor:** Provides real-time water temperature readings.
+* **Air Temperature Sensor:** Reports atmospheric temperature data.
 
 
 ## Installation
