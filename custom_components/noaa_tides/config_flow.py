@@ -26,41 +26,71 @@ from .options_flow import NOAAOptionsFlow
 
 _LOGGER = logging.getLogger(__name__)
 
-API_VALIDATION_URL = (
+NOAA_API_VALIDATION_URL = (
     "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations/{}.json"
 )
+NDBC_API_VALIDATION_URL = "https://www.ndbc.noaa.gov/data/realtime2/{}.txt"
 
 
 async def validate_station_id(station_id: str) -> bool:
-    """Validate NOAA station ID asynchronously."""
-
-    url = API_VALIDATION_URL.format(station_id)  # Correct URL formatting
-    _LOGGER.debug(f"Validating NOAA Station ID: {station_id} with URL: {url}")
-
-    try:
-        async with aiohttp.ClientSession() as session, session.get(url) as response:
-            if response.status == 200:
-                try:
-                    data = await response.json()
-                    if data.get("stations"):
-                        return True  # Station is valid
+    """Validate station ID by checking NOAA API first and then NDBC API if needed."""
+    async with aiohttp.ClientSession() as session:
+        # First, try validating with the NOAA API
+        noaa_url = NOAA_API_VALIDATION_URL.format(station_id)
+        _LOGGER.debug(f"Validating NOAA Station ID: {station_id} with URL: {noaa_url}")
+        try:
+            async with session.get(noaa_url) as response:
+                if response.status == 200:
+                    try:
+                        data = await response.json()
+                        if data.get("stations"):
+                            return True  # Station is valid per NOAA API
+                        _LOGGER.warning(
+                            f"Station {station_id} found on NOAA but response structure is unexpected: {data}"
+                        )
+                    except aiohttp.ContentTypeError:
+                        _LOGGER.error(
+                            f"Invalid JSON response from NOAA API for station {station_id}"
+                        )
+                else:
                     _LOGGER.warning(
-                        f"Station {station_id} found, but response structure is unexpected: {data}"
+                        f"NOAA API returned {response.status} for station {station_id}"
                     )
-                except aiohttp.ContentTypeError:
-                    _LOGGER.error(
-                        f"Invalid JSON response from NOAA API for station {station_id}"
+        except aiohttp.ClientError as e:
+            _LOGGER.error(
+                f"Network error while validating station ID {station_id} on NOAA API: {e}"
+            )
+        except Exception as e:
+            _LOGGER.error(
+                f"Unexpected error validating station ID {station_id} on NOAA API: {e}"
+            )
+
+        # NOAA validation failed; now try the NDBC API
+        ndbc_url = NDBC_API_VALIDATION_URL.format(station_id)
+        _LOGGER.debug(f"Validating NDBC Station ID: {station_id} with URL: {ndbc_url}")
+        try:
+            async with session.get(ndbc_url) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    if text and "Error" not in text:
+                        return True  # Station is valid per NDBC API
+                    _LOGGER.warning(
+                        f"Station {station_id} found on NDBC but response content is unexpected: {text}"
                     )
-            else:
-                _LOGGER.warning(
-                    f"NOAA API returned {response.status} for station {station_id}"
-                )
+                else:
+                    _LOGGER.warning(
+                        f"NDBC API returned {response.status} for station {station_id}"
+                    )
+        except aiohttp.ClientError as e:
+            _LOGGER.error(
+                f"Network error while validating station ID {station_id} on NDBC API: {e}"
+            )
+        except Exception as e:
+            _LOGGER.error(
+                f"Unexpected error validating station ID {station_id} on NDBC API: {e}"
+            )
 
-    except aiohttp.ClientError as e:
-        _LOGGER.error(f"Network error while validating station ID {station_id}: {e}")
-    except Exception as e:
-        _LOGGER.error(f"Unexpected error validating station ID {station_id}: {e}")
-
+    # If neither API confirmed the station, return False.
     return False  # Default to invalid if errors occur
 
 
