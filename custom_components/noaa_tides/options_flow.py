@@ -10,7 +10,7 @@ from homeassistant.const import CONF_NAME
 import homeassistant.helpers.config_validation as cv
 import homeassistant.helpers.device_registry as dr
 
-from .api import get_station_products, async_fetch_ndbc_data
+from .api import get_ndbc_station_products, get_station_products
 from .const import (
     CONF_STATION_ID,
     CONF_TIMEZONE,
@@ -33,6 +33,7 @@ class NOAAOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         """Manage the options."""
         if user_input is not None:
+            # Validate station id first.
             is_valid = await self._validate_station_id(user_input["station_id"])
             if not is_valid:
                 return self.async_show_form(
@@ -40,6 +41,15 @@ class NOAAOptionsFlow(config_entries.OptionsFlow):
                     data_schema=await self._generate_schema(),
                     errors={"station_id": "invalid_station_id"},
                 )
+            # Extract the sensor selections: collect every key (other than the base fields)
+            # that has a value of True.
+            base_keys = {"name", "station_id", "timezone", "unit_system"}
+            enabled_sensors = [
+                key
+                for key, value in user_input.items()
+                if key not in base_keys and value is True
+            ]
+
             self.hass.config_entries.async_update_entry(
                 self._config_entry,
                 data={
@@ -49,7 +59,7 @@ class NOAAOptionsFlow(config_entries.OptionsFlow):
                     CONF_UNIT_SYSTEM: user_input["unit_system"],
                 },
                 options={
-                    "sensors": user_input["sensors"],
+                    "sensors": enabled_sensors,
                     "options_initialized": True,
                 },
             )
@@ -64,78 +74,53 @@ class NOAAOptionsFlow(config_entries.OptionsFlow):
                 sw_version=VERSION,
             )
             return self.async_create_entry(title="", data={})
-        return self.async_show_form(
-            step_id="init", data_schema=await self._generate_schema()
-        )
+        # No user_input: show the form.
+        schema = await self._generate_schema()
+        return self.async_show_form(step_id="init", data_schema=schema)
 
     async def _generate_schema(self):
-        """Generate schema with default values for options flow."""
+        """Generate schema with base fields and individual boolean fields for sensors."""
         station_id = self._config_entry.data.get(CONF_STATION_ID)
         current_options = self._config_entry.options
         station_type = self._config_entry.data.get("station_type", "NOAA")
+        unit_system = self._config_entry.data.get(CONF_UNIT_SYSTEM, "imperial")
 
+        # Determine which sensor keys are available based on station type.
         if station_type == "NDBC":
-            # Define the default list of sensor keys for NDBC stations.
-            sensor_keys = [
-                "wind_speed",
-                "wind_direction",
-                "wave_height",
-                "water_temp",
-                "air_temp",
-                "barometric_pressure",
-            ]
-            # Try to fetch the latest NDBC data so we can filter out sensors
-            # that are returning "MM" (represented as None in our API function).
-            unit_system = self._config_entry.data.get(CONF_UNIT_SYSTEM, "imperial")
-            try:
-                async with aiohttp.ClientSession() as session:
-                    ndbc_data = await async_fetch_ndbc_data(
-                        session, station_id, unit_system
-                    )
-                # Remove any sensor keys for which the data is missing (i.e. None)
-                sensor_keys = [
-                    key for key in sensor_keys if ndbc_data.get(key) is not None
-                ]
-            except Exception as e:
-                _LOGGER.error("Error fetching NDBC data in options flow: %s", e)
-                # If an error occurs, assume all sensors are available.
-            available_sensor_options = {
-                key: SENSOR_OPTIONS.get(key, key) for key in sensor_keys
-            }
+            enabled_sensors = await get_ndbc_station_products(station_id, unit_system)
         else:
-            # For NOAA stations, use the get_station_products routine.
-            available_sensor_keys = await get_station_products(station_id)
-            available_sensor_options = {
-                sensor: SENSOR_OPTIONS[sensor] for sensor in available_sensor_keys
-            }
+            enabled_sensors = await get_station_products(station_id)
 
-        current_sensors = current_options.get(
-            "sensors", list(available_sensor_options.keys())
-        )
-        timezone_options = ["gmt", "lst", "lst_ldt"]
+        # Build a dictionary mapping sensor keys to their friendly names.
+        sensor_options = {
+            sensor: SENSOR_OPTIONS.get(sensor, sensor) for sensor in enabled_sensors
+        }
 
-        return vol.Schema(
-            {
-                vol.Required(
-                    "name", default=self._config_entry.data.get(CONF_NAME, "NOAA Tides")
-                ): cv.string,
-                vol.Required("station_id", default=station_id): cv.string,
-                vol.Required(
-                    "timezone",
-                    default=self._config_entry.data.get(CONF_TIMEZONE, "lst_ldt"),
-                ): vol.In(timezone_options),
-                vol.Required(
-                    "unit_system",
-                    default=self._config_entry.data.get(CONF_UNIT_SYSTEM, "imperial"),
-                ): vol.In(["imperial", "metric"]),
-                vol.Optional("sensors", default=current_sensors): cv.multi_select(
-                    available_sensor_options
-                ),
-            }
-        )
+        # Use the previously saved sensor selections (if any) as the default;
+        # otherwise, default to all available sensors.
+        default_sensors = current_options.get("sensors", list(sensor_options.keys()))
+
+        schema_dict = {
+            vol.Required(
+                "name", default=self._config_entry.data.get(CONF_NAME, "NOAA Tides")
+            ): cv.string,
+            vol.Required("station_id", default=station_id): cv.string,
+            vol.Required(
+                "timezone",
+                default=self._config_entry.data.get(CONF_TIMEZONE, "lst_ldt"),
+            ): vol.In(["gmt", "lst", "lst_ldt"]),
+            vol.Required(
+                "unit_system",
+                default=self._config_entry.data.get(CONF_UNIT_SYSTEM, "imperial"),
+            ): vol.In(["imperial", "metric"]),
+            vol.Optional("sensors", default=default_sensors): cv.multi_select(
+                sensor_options
+            ),
+        }
+        return vol.Schema(schema_dict)
 
     async def _validate_station_id(self, station_id: str) -> bool:
-        """Validate NOAA station ID asynchronously."""
+        """Validate NOAA station ID."""
         url = f"https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations/{station_id}.json"
         _LOGGER.debug(
             "Validating NOAA Station ID in options: %s with URL: %s", station_id, url
