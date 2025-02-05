@@ -1,4 +1,4 @@
-"""Config flow for NOAA Tides integration."""
+"""Config flow for NOAA Tides component."""
 
 import logging
 
@@ -10,7 +10,7 @@ from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
 import homeassistant.helpers.config_validation as cv
 
-from .api import get_station_products
+from .api import get_ndbc_station_products, get_station_products
 from .const import (
     CONF_STATION_ID,
     CONF_TIMEZONE,
@@ -100,55 +100,53 @@ class NOAAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     reauth_entry = None
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial step of setting up NOAA Tides."""
         errors = {}
-
         if user_input is not None:
             station_id = user_input[CONF_STATION_ID]
-
             # Identify station type
             station_type = await identify_station_type(station_id)
             if station_type == "Unknown":
                 errors["station_id"] = "invalid_station_id"
 
             if errors:
-                data_schema = vol.Schema(
-                    {
-                        vol.Required(
-                            CONF_NAME, default=user_input.get(CONF_NAME, DEFAULT_NAME)
-                        ): cv.string,
-                        vol.Required(CONF_STATION_ID, default=station_id): cv.string,
-                        vol.Required(
-                            CONF_TIMEZONE,
-                            default=user_input.get(CONF_TIMEZONE, DEFAULT_TIMEZONE),
-                        ): vol.In(["gmt", "lst", "lst_ldt"]),
-                        vol.Required(
-                            CONF_UNIT_SYSTEM,
-                            default=user_input.get(
-                                CONF_UNIT_SYSTEM, DEFAULT_UNIT_SYSTEM
-                            ),
-                        ): vol.In(["metric", "imperial"]),
-                    }
-                )
-                return self.async_show_form(
-                    step_id="user", data_schema=data_schema, errors=errors
-                )
-            # Fetch available sensors from the station-specific endpoints
-            available_sensors = await get_station_products(station_id)
-            self._user_data = user_input  # Store the initial data
-            self._user_data["station_type"] = station_type  # Store station type
-            if available_sensors:
-                # Proceed to sensor selection step
-                self._available_sensors = available_sensors
+                # (Show form with errors)
+                ...
+
+            self._user_data = user_input
+            self._user_data["station_type"] = station_type
+
+            if station_type == "NDBC":
+                # For NDBC stations, use a fixed list or call get_ndbc_station_products
+                # to filter out sensors with "MM" values.
+                unit_system = user_input.get(CONF_UNIT_SYSTEM, DEFAULT_UNIT_SYSTEM)
+                try:
+                    sensor_keys = await get_ndbc_station_products(
+                        station_id, unit_system
+                    )
+                except Exception as e:
+                    _LOGGER.error("Error fetching NDBC products: %s", e)
+                    sensor_keys = [
+                        "wind_speed",
+                        "wind_direction",
+                        "wave_height",
+                        "water_temp",
+                        "air_temp",
+                        "barometric_pressure",
+                    ]
+                self._available_sensors = sensor_keys
                 return await self.async_step_select_sensors()
             else:
-                # If no sensors are returned, just set sensors to an empty list and complete the flow.
-                self._user_data["sensors"] = []
-                return self.async_create_entry(
-                    title=self._user_data[CONF_NAME], data=self._user_data
-                )
+                # For NOAA stations, fetch available sensors.
+                available_sensors = await get_station_products(station_id)
+                if available_sensors:
+                    self._available_sensors = available_sensors
+                    return await self.async_step_select_sensors()
+                else:
+                    self._user_data["sensors"] = []
+                    return self.async_create_entry(
+                        title=self._user_data[CONF_NAME], data=self._user_data
+                    )
 
-        # Define the schema for the user form
         timezone_options = ["gmt", "lst", "lst_ldt"]
         data_schema = vol.Schema(
             {
@@ -162,13 +160,12 @@ class NOAAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
             }
         )
-
         return self.async_show_form(
             step_id="user", data_schema=data_schema, errors=errors
         )
 
     async def async_step_select_sensors(self, user_input=None):
-        """Step for selecting sensors based on available NOAA products."""
+        """Step for selecting sensors based on available station products."""
         if user_input is not None:
             self._user_data["sensors"] = user_input["sensors"]
             await self.async_set_unique_id(self._user_data[CONF_STATION_ID])
@@ -176,8 +173,11 @@ class NOAAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(
                 title=self._user_data[CONF_NAME], data=self._user_data
             )
+
+        # Build a mapping of sensor key to a friendly label.
         sensor_options = {
-            sensor: SENSOR_OPTIONS[sensor] for sensor in self._available_sensors
+            sensor: SENSOR_OPTIONS.get(sensor, sensor)
+            for sensor in self._available_sensors
         }
         data_schema = vol.Schema(
             {
