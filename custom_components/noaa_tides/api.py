@@ -75,6 +75,152 @@ async def get_station_products(station_id: str) -> list[str]:
     return list(available_sensors)
 
 
+async def get_ndbc_station_products(station_id: str, unit_system: str) -> list[str]:
+    """Fetch available sensor keys for an NDBC station.
+
+    This function queries the realtime text endpoint for the given station,
+    parses the data, and returns a list of internal sensor keys (e.g. "wind_speed",
+    "wind_direction", "wave_height", "water_temp", "air_temp", "barometric_pressure")
+    that have valid sensor values (i.e. values not showing "MM").
+    """
+    url = f"https://www.ndbc.noaa.gov/data/realtime2/{station_id}.txt"
+    # Define the full list of sensor keys to consider.
+    sensor_keys = [
+        "wind_speed",
+        "wind_direction",
+        "wave_height",
+        "water_temp",
+        "air_temp",
+        "barometric_pressure",
+    ]
+
+    try:
+        async with aiohttp.ClientSession() as session, session.get(url) as resp:
+            if resp.status != 200:
+                _LOGGER.error(
+                    "NDBC API returned %s for station %s", resp.status, station_id
+                )
+                return []
+            text = await resp.text()
+    except Exception as err:
+        _LOGGER.error("Error fetching NDBC data for station %s: %s", station_id, err)
+        return []
+
+    lines = text.splitlines()
+    if not lines:
+        _LOGGER.error("No data received from NDBC API for station %s", station_id)
+        return []
+
+    # Assume the first non-empty line is the header.
+    header = lines[0].strip().split()
+    if header and header[0].startswith("#"):
+        header[0] = header[0].lstrip("#")
+
+    # Choose a data row—preferably the second line, or fallback to the last.
+    data_line = None
+    if len(lines) > 1:
+        try:
+            parts = lines[1].strip().split()
+            float(parts[0])
+            data_line = parts
+        except ValueError:
+            if len(lines) > 2:
+                data_line = lines[2].strip().split()
+        if data_line is None:
+            data_line = lines[-1].strip().split()
+    else:
+        _LOGGER.error("Insufficient data from NDBC API for station %s", station_id)
+        return []
+
+    data_dict = dict(zip(header, data_line))
+
+    # Build a dictionary of sensor values. If a field is "MM" or missing, set it to None.
+    sensors_data = {}
+    try:
+        sensors_data["wind_speed"] = (
+            float(data_dict.get("WSPD"))
+            if data_dict.get("WSPD") not in (None, "MM")
+            else None
+        )
+    except Exception:
+        sensors_data["wind_speed"] = None
+
+    try:
+        sensors_data["wind_direction"] = (
+            float(data_dict.get("WDIR"))
+            if data_dict.get("WDIR") not in (None, "MM")
+            else None
+        )
+    except Exception:
+        sensors_data["wind_direction"] = None
+
+    try:
+        sensors_data["wave_height"] = (
+            float(data_dict.get("WVHT"))
+            if data_dict.get("WVHT") not in (None, "MM")
+            else None
+        )
+    except Exception:
+        sensors_data["wave_height"] = None
+
+    try:
+        # Convert "WTMP" to our internal key "water_temp"
+        sensors_data["water_temp"] = (
+            float(data_dict.get("WTMP"))
+            if data_dict.get("WTMP") not in (None, "MM")
+            else None
+        )
+    except Exception:
+        sensors_data["water_temp"] = None
+
+    try:
+        # Convert "ATMP" to our internal key "air_temp"
+        sensors_data["air_temp"] = (
+            float(data_dict.get("ATMP"))
+            if data_dict.get("ATMP") not in (None, "MM")
+            else None
+        )
+    except Exception:
+        sensors_data["air_temp"] = None
+
+    try:
+        sensors_data["barometric_pressure"] = (
+            float(data_dict.get("PRES"))
+            if data_dict.get("PRES") not in (None, "MM")
+            else None
+        )
+    except Exception:
+        sensors_data["barometric_pressure"] = None
+
+    # If imperial units are desired, perform conversions.
+    if unit_system.lower() == "imperial":
+        if sensors_data["wind_speed"] is not None:
+            sensors_data["wind_speed"] = round(sensors_data["wind_speed"] * 2.23694, 2)
+        if sensors_data["wave_height"] is not None:
+            sensors_data["wave_height"] = round(
+                sensors_data["wave_height"] * 3.28084, 2
+            )
+        if sensors_data["air_temp"] is not None:
+            sensors_data["air_temp"] = round((sensors_data["air_temp"] * 9 / 5) + 32, 2)
+        if sensors_data["water_temp"] is not None:
+            sensors_data["water_temp"] = round(
+                (sensors_data["water_temp"] * 9 / 5) + 32, 2
+            )
+        if sensors_data["barometric_pressure"] is not None:
+            sensors_data["barometric_pressure"] = round(
+                sensors_data["barometric_pressure"] * 0.02953, 2
+            )
+
+    # Return only those sensor keys that have valid (non-None) data.
+    available_sensors = [
+        key for key in sensor_keys if sensors_data.get(key) is not None
+    ]
+    _LOGGER.debug(
+        "Available NDBC sensors for station %s: %s", station_id, available_sensors
+    )
+    return available_sensors
+
+
 async def async_fetch_noaa_data(
     session: aiohttp.ClientSession,
     station_id: str,
