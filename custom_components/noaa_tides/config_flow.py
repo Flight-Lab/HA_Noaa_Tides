@@ -1,164 +1,266 @@
-"""Config flow for NOAA Tides component."""
+"""Config flow for NOAA Tides integration."""
+
+from __future__ import annotations
 
 import logging
+from typing import Any, Final, NotRequired, TypedDict
 
-import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
-from homeassistant.core import callback
-import homeassistant.helpers.config_validation as cv
-import homeassistant.helpers.device_registry as dr
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import config_validation as cv
 
-from .api import get_station_products
-from .const import (
-    CONF_STATION_ID,
-    CONF_TIMEZONE,
-    CONF_UNIT_SYSTEM,
-    DEFAULT_NAME,
-    DEFAULT_TIMEZONE,
-    DEFAULT_UNIT_SYSTEM,
-    DOMAIN,
-    SENSOR_OPTIONS,
+from . import const
+from .utils import (
+    discover_ndbc_sensors,
+    discover_noaa_sensors,
+    validate_ndbc_buoy,
+    validate_noaa_station,
 )
-from .options_flow import NOAAOptionsFlow
 
 _LOGGER = logging.getLogger(__name__)
 
-API_VALIDATION_URL = (
-    "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations/{}.json"
-)
+
+class ConfigFlowData(TypedDict):
+    """Config flow data type."""
+
+    name: str
+    sensors: list[str]
+    hub_type: str
+    station_id: NotRequired[str]  # NOAA stations
+    buoy_id: NotRequired[str]  # NDBC buoys
+    timezone: str
+    unit_system: str
+    update_interval: int
+    data_sections: NotRequired[list[str]]  # Only for NDBC
 
 
-async def validate_station_id(station_id: str) -> bool:
-    """Validate NOAA station ID asynchronously."""
+class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
+    """Handle a config flow for NOAA Tides integration."""
 
-    url = API_VALIDATION_URL.format(station_id)  # Correct URL formatting
-    _LOGGER.debug(f"Validating NOAA Station ID: {station_id} with URL: {url}")
+    VERSION: Final = 1
 
-    try:
-        async with aiohttp.ClientSession() as session, session.get(url) as response:
-            if response.status == 200:
-                try:
-                    data = await response.json()
-                    if data.get("stations"):
-                        return True  # Station is valid
-                    _LOGGER.warning(
-                        f"Station {station_id} found, but response structure is unexpected: {data}"
-                    )
-                except aiohttp.ContentTypeError:
-                    _LOGGER.error(
-                        f"Invalid JSON response from NOAA API for station {station_id}"
-                    )
-            else:
-                _LOGGER.warning(
-                    f"NOAA API returned {response.status} for station {station_id}"
-                )
+    def __init__(self) -> None:
+        """Initialize the config flow."""
+        self._data: ConfigFlowData = ConfigFlowData(
+            name="",
+            sensors=[],
+            hub_type="",
+            timezone=const.DEFAULT_TIMEZONE,
+            unit_system=const.DEFAULT_UNIT_SYSTEM,
+            update_interval=const.DEFAULT_UPDATE_INTERVAL,
+        )
+        self._available_sensors: dict[str, str] = {}
 
-    except aiohttp.ClientError as e:
-        _LOGGER.error(f"Network error while validating station ID {station_id}: {e}")
-    except Exception as e:
-        _LOGGER.error(f"Unexpected error validating station ID {station_id}: {e}")
-
-    return False  # Default to invalid if errors occur
-
-
-class NOAAConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle the configuration flow for NOAA Tides."""
-
-    VERSION = 1
-    reauth_entry = None
-
-    async def async_step_user(self, user_input=None):
-        """Handle the initial step of setting up NOAA Tides."""
-        errors = {}
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the initial step - hub type selection."""
+        errors: dict[str, str] = {}
 
         if user_input is not None:
-            station_id = user_input[CONF_STATION_ID]
-
-            # Validate station ID
-            is_valid = await validate_station_id(station_id)
-            if not is_valid:
-                errors["station_id"] = "invalid_station_id"
-
-            if errors:
-                data_schema = vol.Schema(
-                    {
-                        vol.Required(
-                            CONF_NAME, default=user_input.get(CONF_NAME, DEFAULT_NAME)
-                        ): cv.string,
-                        vol.Required(CONF_STATION_ID, default=station_id): cv.string,
-                        vol.Required(
-                            CONF_TIMEZONE,
-                            default=user_input.get(CONF_TIMEZONE, DEFAULT_TIMEZONE),
-                        ): vol.In(["gmt", "lst", "lst_ldt"]),
-                        vol.Required(
-                            CONF_UNIT_SYSTEM,
-                            default=user_input.get(
-                                CONF_UNIT_SYSTEM, DEFAULT_UNIT_SYSTEM
-                            ),
-                        ): vol.In(["metric", "imperial"]),
-                    }
-                )
-                return self.async_show_form(
-                    step_id="user", data_schema=data_schema, errors=errors
-                )
-            # Fetch available sensors from the station-specific endpoints
-            available_sensors = await get_station_products(station_id)
-            self._user_data = user_input  # store the initial data
-            if available_sensors:
-                # Proceed to sensor selection step
-                self._available_sensors = available_sensors
-                return await self.async_step_select_sensors()
-            else:
-                # If no sensors are returned, just set sensors to an empty list and complete the flow.
-                self._user_data["sensors"] = []
-                return self.async_create_entry(
-                    title=self._user_data[CONF_NAME], data=self._user_data
-                )
-
-        # Define the schema for the user form
-        timezone_options = ["gmt", "lst", "lst_ldt"]
-        data_schema = vol.Schema(
-            {
-                vol.Required(CONF_NAME, default=DEFAULT_NAME): cv.string,
-                vol.Required(CONF_STATION_ID): cv.string,
-                vol.Required(CONF_TIMEZONE, default=DEFAULT_TIMEZONE): vol.In(
-                    timezone_options
-                ),
-                vol.Required(CONF_UNIT_SYSTEM, default=DEFAULT_UNIT_SYSTEM): vol.In(
-                    ["metric", "imperial"]
-                ),
-            }
-        )
+            self._data.update(user_input)
+            return await self.async_step_station_config()
 
         return self.async_show_form(
-            step_id="user", data_schema=data_schema, errors=errors
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(const.CONF_HUB_TYPE): vol.In(
+                        {
+                            const.HUB_TYPE_NOAA: "NOAA Station",
+                            const.HUB_TYPE_NDBC: "NDBC Buoy",
+                        }
+                    ),
+                }
+            ),
+            errors=errors,
         )
 
-    async def async_step_select_sensors(self, user_input=None):
-        """Step for selecting sensors based on available NOAA products."""
+    async def async_step_station_config(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the station configuration step."""
+        errors: dict[str, str] = {}
+
         if user_input is not None:
-            self._user_data["sensors"] = user_input["sensors"]
-            await self.async_set_unique_id(self._user_data[CONF_STATION_ID])
-            self._abort_if_unique_id_configured()
-            return self.async_create_entry(
-                title=self._user_data[CONF_NAME], data=self._user_data
+            # Validate station/buoy ID based on hub type
+            is_noaa = self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA
+            station_id = user_input.get(
+                const.CONF_STATION_ID if is_noaa else const.CONF_BUOY_ID
             )
-        sensor_options = {
-            sensor: SENSOR_OPTIONS[sensor] for sensor in self._available_sensors
+            station_valid = await self._validate_station(station_id)
+
+            if not station_valid:
+                errors["base"] = (
+                    const.ERROR_INVALID_STATION if is_noaa else const.ERROR_INVALID_BUOY
+                )
+            else:
+                self._data.update(user_input)
+                if not is_noaa:
+                    return await self.async_step_ndbc_data()
+                return await self.async_step_sensor_select()
+
+        # Build schema based on hub type
+        is_noaa = self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA
+        schema = {
+            vol.Required(const.CONF_STATION_ID if is_noaa else const.CONF_BUOY_ID): str,
+            vol.Required(
+                "name",
+                default=const.DEFAULT_NAME_NOAA if is_noaa else const.DEFAULT_NAME_NDBC,
+            ): str,
+            vol.Required(const.CONF_TIMEZONE, default=const.DEFAULT_TIMEZONE): vol.In(
+                const.TIMEZONE_OPTIONS
+            ),
+            vol.Required(
+                const.CONF_UNIT_SYSTEM, default=const.DEFAULT_UNIT_SYSTEM
+            ): vol.In(const.UNIT_OPTIONS),
+            vol.Required(
+                const.CONF_UPDATE_INTERVAL, default=const.DEFAULT_UPDATE_INTERVAL
+            ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
         }
-        data_schema = vol.Schema(
-            {
-                vol.Required(
-                    "sensors", default=self._available_sensors
-                ): cv.multi_select(sensor_options)
-            }
+
+        return self.async_show_form(
+            step_id="station_config",
+            data_schema=vol.Schema(schema),
+            errors=errors,
         )
-        return self.async_show_form(step_id="select_sensors", data_schema=data_schema)
+
+    async def async_step_ndbc_data(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle NDBC data section selection."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            if not user_input.get(const.CONF_DATA_SECTIONS, []):
+                errors["base"] = const.ERROR_NO_DATA_SECTIONS
+            else:
+                self._data.update(user_input)
+                return await self.async_step_sensor_select()
+
+        return self.async_show_form(
+            step_id="ndbc_data",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(const.CONF_DATA_SECTIONS): cv.multi_select(
+                        const.DATA_SECTIONS
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_sensor_select(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle sensor selection."""
+        errors: dict[str, str] = {}
+
+        try:
+            if not self._available_sensors:
+                self._available_sensors = await self._discover_sensors()
+
+            _LOGGER.debug(
+                "Available sensors for selection: %s", self._available_sensors
+            )
+
+            if not self._available_sensors:
+                errors["base"] = "no_sensors"
+                return self.async_show_form(
+                    step_id="sensor_select",
+                    errors=errors,
+                    description_placeholders={
+                        "station_id": self._data.get("station_id")
+                        or self._data.get("buoy_id", "unknown")
+                    },
+                )
+
+            if user_input is not None:
+                self._data.update(user_input)
+                return self.async_create_entry(
+                    title=self._data["name"],
+                    data=self._data,
+                )
+
+            return self.async_show_form(
+                step_id="sensor_select",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required("sensors"): cv.multi_select(
+                            self._available_sensors
+                        ),
+                    }
+                ),
+                errors=errors,
+            )
+        except Exception as ex:
+            _LOGGER.exception("Unexpected error in sensor selection: %s", ex)
+            errors["base"] = "unknown"
+            return self.async_show_form(
+                step_id="sensor_select",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required("sensors"): cv.multi_select({}),
+                    }
+                ),
+                errors=errors,
+            )
+
+    async def _validate_station(self, station_id: str) -> bool:
+        """Validate the station/buoy ID."""
+        if self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA:
+            return await validate_noaa_station(self.hass, station_id)
+        else:
+            return await validate_ndbc_buoy(
+                self.hass, station_id, self._data.get(const.CONF_DATA_SECTIONS, [])
+            )
+
+    async def _discover_sensors(self) -> dict[str, str]:
+        """Discover available sensors based on hub type and configuration."""
+        if self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA:
+            return await discover_noaa_sensors(
+                self.hass, self._data[const.CONF_STATION_ID]
+            )
+        else:
+            return await discover_ndbc_sensors(
+                self.hass,
+                self._data[const.CONF_BUOY_ID],
+                self._data.get(const.CONF_DATA_SECTIONS, []),
+            )
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry):
-        return NOAAOptionsFlow(config_entry)
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> NoaaTidesOptionsFlow:
+        """Get the options flow for this handler."""
+        return NoaaTidesOptionsFlow(config_entry)
+
+
+class NoaaTidesOptionsFlow(config_entries.OptionsFlow):
+    """Handle options for the NOAA Tides integration."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle options flow."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        options = {
+            vol.Required(
+                const.CONF_UPDATE_INTERVAL,
+                default=self._config_entry.options.get(
+                    const.CONF_UPDATE_INTERVAL, const.DEFAULT_UPDATE_INTERVAL
+                ),
+            ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
+        }
+
+        return self.async_show_form(step_id="init", data_schema=vol.Schema(options))

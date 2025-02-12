@@ -1,24 +1,124 @@
-# NOAA Tides and Currents Custom Component for Home Assistant
-The NOAA Tides custom component provides real-time tidal and environmental data from NOAA's CO-OPS API. This component replaces the legacy NOAA Tides [core component](https://www.home-assistant.io/integrations/noaa_tides/), offering enhanced configurability, automatic sensor detection, and improved data handling.
+# NOAA Tides Integration for Home Assistant
+
+<!--
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+-->
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+A custom component for Home Assistant that provides real-time tidal, current, and environmental data from NOAA's Center for Operational Oceanographic Products and Services (CO-OPS) API and the National Data Buoy Center (NDBC) API. This component enhances and extends the functionality of the [legacy NOAA Tides core component](https://www.home-assistant.io/integrations/noaa_tides/), offering improved UI configurability, automatic sensor detection, and enhanced data handling.
+
+## Features
+
+- **Dual Data Sources**: 
+  - NOAA CO-OPS stations for coastal tidal and environmental data
+  - NDBC buoys for offshore marine and weather observations
+- **Automatic Sensor Discovery**: Available sensors are automatically detected based on your station/buoy selection
+- **Real-time Data**: Regular updates from NOAA/NDBC APIs
+- **Configurable Units**: Support for both metric and imperial measurements
+- **Multiple Time Zone Options**: GMT, Local Standard Time, or Local Standard/Daylight Time
+- **Customizable Update Intervals**: Adjust data refresh frequency to your needs
+
+## Available Sensors
+
+### NOAA Station Sensors
+- Water Level
+- Tide Predictions (with tide state, timing, factor, and percentage)
+- Current Speed and Direction
+- Current Predictions (experimental)
+- Water Temperature
+- Air Temperature
+- Wind Speed and Direction
+- Air Pressure
+- Humidity
+- Conductivity
+
+### NDBC Buoy Sensors
+- Meteorological Data
+  - Wind Speed, Direction, and Gusts
+  - Wave Height and Period
+  - Air Temperature
+  - Water Temperature
+  - Barometric Pressure
+- Spectral Wave Data
+- Ocean Current Data
 
 ## Installation
 
-1. Clone this repository to your local machine.
-2. Copy the `noaa_tides` folder to your Home Assistant `custom_components` directory.
-3. Restart Home Assistant.
+<!--
+### Using HACS (Recommended)
+
+1. Ensure you have [HACS](https://hacs.xyz/) installed
+2. Add this repository as a custom repository in HACS:
+   - Go to HACS > Integrations
+   - Click the three dots in the top right
+   - Select "Custom repositories"
+   - Add `Flight-Lab/home_assistant_noaa_tides` with Category "Integration"
+3. Click "Install"
+4. Restart Home Assistant
+-->
+
+### Manual Installation
+
+1. Download the latest release from the releases page
+2. Extract the `noaa_tides` folder to your Home Assistant `custom_components` directory
+3. Restart Home Assistant
 
 ## Configuration
 
-To configure the NOAA Tides integration, follow these steps:
+1. Go to Settings > Devices & Services
+2. Click "Add Integration" and search for "NOAA Tides"
+3. Select your preferred data source:
+   - NOAA Station: For coastal stations with tidal data
+   - NDBC Buoy: For offshore marine observations
+4. Enter your station/buoy ID
+5. Configure additional options:
+   - Name: Custom name for the integration
+   - Time Zone: Select preferred time zone display
+   - Unit System: Choose metric or imperial units
+   - Update Interval: Set data refresh frequency
+   - For NDBC buoys: Select desired data sections
+6. Choose available sensors from the discovered list
 
-1. Go to the Home Assistant UI.
-2. Navigate to `Configuration` > `Integrations`.
-3. Click on `Add Integration` and search for `NOAA Tides`.
-4. Follow the prompts to enter your configuration details.
+## Finding Your Station/Buoy ID
 
-Different stations support different features (products/datums/sensors). Available features are automatically pulled from a given station during configuration.
-[Station finder](https://tidesandcurrents.noaa.gov/map/index.html?type=datums).
-<!-- [Buoy finder](https://www.ndbc.noaa.gov/obs.shtml?type=oceans&status=r&pgm=IOOS%20Partners|International%20Partners|Marine%20METAR|NDBC%20Meteorological%2FOcean|NERRS|NOS%2FCO-OPS&op=&ls=n)) -->
+### NOAA Stations
+Visit the [NOAA Tides and Currents Map](https://tidesandcurrents.noaa.gov/map/) to find your station. NOAA operates nearly 500 stations with real-time data in the U.S., Caribbean, and Pacific territories. Alongside these physical stations, NOAA provides thousands of virtual stations to offering localized tide and current predictions, providing comprehensive coverage of coastal areas. Different stations support various data types:
+- [Tide Predictions](https://tidesandcurrents.noaa.gov/map/index.html?type=tidepredictions)
+- [Current Predictions](https://tidesandcurrents.noaa.gov/map/index.html?type=currentpredictions) (experimental)
+- [Meteorological Observations](https://tidesandcurrents.noaa.gov/map/index.html?type=meteorological)
+- [Real Time Currents](https://tidesandcurrents.noaa.gov/map/index.html?type=currents)
+- [Conductivity](https://tidesandcurrents.noaa.gov/map/index.html?type=conductivity)
+
+### NDBC Buoys
+Use the [NDBC Station Map and Buoy Finder](https://www.ndbc.noaa.gov/obs.shtml?type=oceans&status=r&pgm=IOOS%20Partners|International%20Partners|Marine%20METAR|NDBC%20Meteorological%2FOcean|NERRS|NOS%2FCO-OPS&op=&ls=n) to locate your buoy.
+NDBC and it's partners operate nearly 1000 active buoys and coastal stations worldwide, with particularly extensive coverage in U.S. coastal waters, the Great Lakes, and Alaska.
+<!-- narrow map parameters with further testing -->
+
+## Data Interpretation
+
+### Tide Predictions
+- **Tide State**: Indicates if tide is rising or falling
+- **Tide Factor**: Sinusoidal representation of tide level (0-100%)
+- **Tide Percentage**: Linear representation of tide progress (0-100%)
+
+### Current Predictions (experimental)
+- **Current State**: Shows ebb, flood, or slack water
+- **Direction**: Compass bearing of water movement
+- **Speed**: Current velocity
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Support
+
+For bugs and feature requests, please [open an issue](https://github.com/Flight-Lab/ha_noaa_tides/issues) on GitHub.
+
+<!--
 
 ## Sample configuration
 
@@ -35,14 +135,6 @@ Tide factor is used to create a sinusoidal wave graph to represent the tide leve
 Tide percentage creates a linear graph and is useful for making something like a tide clock.
 
 
-## Sensors:
-
-* **Automatic Sensor Detection:** During setup, the component auto-detects and pulls available sensors based on the selected station ID.
-* **Tide State Sensor:** Displays the upcoming tide type and time.
-  * **Attributes:** NOAA predicted tide levels. previous tide details, calculated tide factor & percentage.
-* **Water Level Sensor:** Reports the current water level relative to the selected station.
-* **Water Temperature Sensor:** Provides real-time water temperature readings.
-* **Air Temperature Sensor:** Reports atmospheric temperature data.
-
 ![Device page](/images/device_page.png)
 ![Tide state](/images/tide_state.png)
+-->
