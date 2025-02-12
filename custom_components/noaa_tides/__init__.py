@@ -1,78 +1,121 @@
-"""The NOAA Tides component."""
+"""The NOAA Tides integration."""
+
+from __future__ import annotations
 
 import logging
+from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 
-from .api import NOAADataCoordinator
-from .const import CONF_STATION_ID, CONF_TIMEZONE, CONF_UNIT_SYSTEM, DOMAIN, PLATFORMS
+from . import const
+from .coordinator import NoaaTidesDataUpdateCoordinator
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER: Final = logging.getLogger(__name__)
+
+# Define platforms
+PLATFORMS: Final[list[Platform]] = [Platform.SENSOR]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Set up the noaa_tides integration from a ConfigEntry."""
-    _LOGGER.debug(
-        "Setting up noaa_tides integration from ConfigEntry: %s", entry.as_dict()
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up NOAA Tides from a config entry.
+
+    Args:
+        hass: The HomeAssistant instance
+        entry: The ConfigEntry to set up
+
+    Returns:
+        bool: True if setup was successful, False otherwise
+
+    Raises:
+        ConfigEntryNotReady: If initial data fetch fails
+    """
+    # Create coordinator with proper type hints
+    coordinator = NoaaTidesDataUpdateCoordinator(
+        hass,
+        hub_type=entry.data[const.CONF_HUB_TYPE],
+        station_id=entry.data.get(const.CONF_STATION_ID)
+        or entry.data.get(const.CONF_BUOY_ID),
+        selected_sensors=entry.data.get("sensors", []),
+        timezone=entry.data.get(const.CONF_TIMEZONE, const.DEFAULT_TIMEZONE),
+        unit_system=entry.data.get(const.CONF_UNIT_SYSTEM, const.DEFAULT_UNIT_SYSTEM),
+        update_interval=entry.data.get(
+            const.CONF_UPDATE_INTERVAL, const.DEFAULT_UPDATE_INTERVAL
+        ),
+        data_sections=entry.data.get(const.CONF_DATA_SECTIONS, []),
     )
 
-    # Extract configuration details
-    station_id = entry.data[CONF_STATION_ID]
-    timezone = entry.data[CONF_TIMEZONE]
-    unit_system = entry.data[CONF_UNIT_SYSTEM]
+    # Store coordinator before first refresh to ensure it's available for the platforms
+    hass.data.setdefault(const.DOMAIN, {})
+    hass.data[const.DOMAIN][entry.entry_id] = coordinator
 
-    # Read sensor configuration from options first (if available) then fallback to data.
-    selected_sensors = entry.options.get("sensors", entry.data.get("sensors", []))
-
-    # Initialize the data coordinator, which manages API calls, updates, and caching.
-    coordinator = NOAADataCoordinator(hass, station_id, timezone, unit_system)
-    # Perform the initial data fetch
-    await coordinator.async_config_entry_first_refresh()
-
-    # Store the coordinator and config entry in hass.data so sensors (and possibly other platforms) can access it.
-    hass.data.setdefault(DOMAIN, {})  # Ensure domain key exists
-    hass.data[DOMAIN][entry.entry_id] = {
-        "coordinator": coordinator,
-        "entry": entry,
-        "sensors": selected_sensors,
-    }
-
-    # Forward the configuration entry to the relevant platforms (sensors, etc.)
+    # Set up platforms first so entities are ready for the data
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Now fetch initial data
+    await coordinator.async_refresh()
+    if not coordinator.last_update_success:
+        # Remove the config entry from domain data if initial refresh failed
+        hass.data[const.DOMAIN].pop(entry.entry_id)
+        raise ConfigEntryNotReady(
+            f"Failed to fetch initial data from "
+            f"{'NOAA station' if entry.data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA else 'NDBC buoy'} "
+            f"{coordinator.station_id}"
+        )
+
+    # Register update listener for config entry changes
+    entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Unload a config entry and clean up resources."""
-    _LOGGER.debug("Unloading noaa_tides ConfigEntry: %s", entry.entry_id)
+async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Update options for the NOAA Tides integration.
 
-    # Attempt to unload the integration's platforms
+    Args:
+        hass: The HomeAssistant instance
+        entry: The ConfigEntry being updated
+    """
+    # Force an immediate reload of the entry when options change
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry.
+
+    Args:
+        hass: The HomeAssistant instance
+        entry: The ConfigEntry to unload
+
+    Returns:
+        bool: True if unload was successful, False otherwise
+    """
+    # Unload platforms
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        # Remove the entry from hass.data to free up memory and prevent conflicts
-        hass.data[DOMAIN].pop(entry.entry_id, None)
 
-        # If there are no remaining entries, remove the domain data entirely
-        if not hass.data[DOMAIN]:
-            hass.data.pop(DOMAIN)
+    # Remove config entry from domain data
+    if unload_ok:
+        hass.data[const.DOMAIN].pop(entry.entry_id)
+
     return unload_ok
 
 
-async def async_get_options_flow(config_entry: ConfigEntry):
-    """Return the options flow handler for this integration, enabling reconfiguration."""
-    from .options_flow import NOAAOptionsFlow
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate an old config entry to new version.
 
-    return NOAAOptionsFlow(config_entry)
+    Args:
+        hass: The HomeAssistant instance
+        entry: The ConfigEntry to migrate
 
+    Returns:
+        bool: True if migration was successful, False otherwise
+    """
+    _LOGGER.debug("Migrating from version %s", entry.version)
 
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry):
-    """Handle reloading of a configuration entry."""
-    _LOGGER.info("Reloading NOAA Tides config entry: %s", entry.entry_id)
+    if entry.version == 1:
+        # Currently no migrations needed
+        return True
 
-    # Unload the entry first
-    await async_unload_entry(hass, entry)
-
-    # Reload the entry
-    return await async_setup_entry(hass, entry)
+    return False
