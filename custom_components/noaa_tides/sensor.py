@@ -1,219 +1,348 @@
-"""Sensor for the NOAA Tides and Currents API."""
+"""Sensor platform for NOAA Tides integration."""
 
-from datetime import datetime
-import logging
-import math
+from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.const import UnitOfTemperature
+from dataclasses import dataclass
+from typing import Any, Final, Literal, NotRequired, TypedDict
+
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import (
+    DEGREE,
+    PERCENTAGE,
+    UnitOfLength,
+    UnitOfPressure,
+    UnitOfSpeed,
+    UnitOfTemperature,
+)
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from . import const
+from .coordinator import NoaaTidesDataUpdateCoordinator, SensorData
 
-_LOGGER = logging.getLogger(__name__)
+
+class WindSensorAttributes(TypedDict):
+    """Wind sensor attributes type."""
+
+    direction: float | None
+    direction_cardinal: str | None
+    gust: float | None
+    time: str
+    flags: str | None
 
 
-async def async_setup_entry(hass, entry, async_add_entities):
-    """Set up NOAA Tides sensors from a config entry."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    selected_sensors = entry.options.get("sensors") or entry.data.get("sensors") or []
+class TideSensorAttributes(TypedDict):
+    """Tide sensor attributes type."""
 
-    sensor_class_map = {
-        "tide_state": NOAATidesSensor,
-        "measured_level": NOAAMeasuredLevelSensor,
-        "water_temp": NOAAWaterTempSensor,
-        "air_temp": NOAAAirTempSensor,
-    }
+    time: str
+    units: str
+    datum: str
 
+
+class MeteoSensorAttributes(TypedDict):
+    """Meteorological sensor attributes type."""
+
+    raw_value: str
+    parameter: str
+
+
+@dataclass(frozen=True)
+class NoaaTidesSensorEntityDescription(SensorEntityDescription):
+    """Class describing NOAA Tides sensor entities."""
+
+    unit_metric: str | None = None
+    unit_imperial: str | None = None
+
+
+# Sensor descriptions for NOAA Station
+NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
+    "water_level": NoaaTidesSensorEntityDescription(
+        key="water_level",
+        name="Water Level",
+        native_unit_of_measurement=UnitOfLength.METERS,
+        device_class=SensorDeviceClass.DISTANCE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfLength.METERS,
+        unit_imperial=UnitOfLength.FEET,
+    ),
+    "tide_predictions": NoaaTidesSensorEntityDescription(
+        key="tide_predictions",
+        name="Tide State",
+        icon="mdi:waves",
+    ),
+    "currents_speed": NoaaTidesSensorEntityDescription(
+        key="currents_speed",
+        name="Currents Speed",
+        device_class=SensorDeviceClass.SPEED,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfSpeed.METERS_PER_SECOND,
+        unit_imperial=UnitOfSpeed.KNOTS,
+    ),
+    "currents_direction": NoaaTidesSensorEntityDescription(
+        key="currents_direction",
+        name="Currents Direction",
+        native_unit_of_measurement=DEGREE,
+        icon="mdi:compass",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    "currents_predictions": NoaaTidesSensorEntityDescription(
+        key="currents_predictions",
+        name="Predicted Currents State",
+        icon="mdi:wave",
+    ),
+    "air_temperature": NoaaTidesSensorEntityDescription(
+        key="air_temperature",
+        name="Air Temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfTemperature.CELSIUS,
+        unit_imperial=UnitOfTemperature.FAHRENHEIT,
+    ),
+    "water_temperature": NoaaTidesSensorEntityDescription(
+        key="water_temperature",
+        name="Water Temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfTemperature.CELSIUS,
+        unit_imperial=UnitOfTemperature.FAHRENHEIT,
+    ),
+    "wind_speed": NoaaTidesSensorEntityDescription(
+        key="wind_speed",
+        name="Wind Speed",
+        device_class=SensorDeviceClass.WIND_SPEED,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfSpeed.KILOMETERS_PER_HOUR,
+        unit_imperial=UnitOfSpeed.MILES_PER_HOUR,
+    ),
+    "wind_direction": NoaaTidesSensorEntityDescription(
+        key="wind_direction",
+        name="Wind Direction",
+        native_unit_of_measurement=DEGREE,
+        icon="mdi:compass",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    "air_pressure": NoaaTidesSensorEntityDescription(
+        key="air_pressure",
+        name="Barometric Pressure",
+        device_class=SensorDeviceClass.PRESSURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfPressure.HPA,
+        unit_imperial=UnitOfPressure.INHG,
+    ),
+    "humidity": NoaaTidesSensorEntityDescription(
+        key="humidity",
+        name="Humidity",
+        device_class=SensorDeviceClass.HUMIDITY,
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=PERCENTAGE,
+    ),
+    "conductivity": NoaaTidesSensorEntityDescription(
+        key="conductivity",
+        name="Conductivity",
+        icon="mdi:flash",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement="mS/cm",
+    ),
+}
+
+# Sensor descriptions for NDBC Buoy
+NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
+    "meteo_wdir": NoaaTidesSensorEntityDescription(
+        key="meteo_wdir",
+        name="Wind Direction",
+        native_unit_of_measurement=DEGREE,
+        icon="mdi:compass",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    "meteo_wspd": NoaaTidesSensorEntityDescription(
+        key="meteo_wspd",
+        name="Wind Speed",
+        device_class=SensorDeviceClass.WIND_SPEED,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfSpeed.METERS_PER_SECOND,
+        unit_imperial=UnitOfSpeed.MILES_PER_HOUR,
+    ),
+    "meteo_gst": NoaaTidesSensorEntityDescription(
+        key="meteo_gst",
+        name="Wind Gust",
+        device_class=SensorDeviceClass.WIND_SPEED,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfSpeed.METERS_PER_SECOND,
+        unit_imperial=UnitOfSpeed.MILES_PER_HOUR,
+    ),
+    "meteo_wvht": NoaaTidesSensorEntityDescription(
+        key="meteo_wvht",
+        name="Wave Height",
+        icon="mdi:waves",
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfLength.METERS,
+        unit_imperial=UnitOfLength.FEET,
+    ),
+    "meteo_dpd": NoaaTidesSensorEntityDescription(
+        key="meteo_dpd",
+        name="Dominant Wave Period",
+        icon="mdi:wave",
+        native_unit_of_measurement="s",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    "meteo_apd": NoaaTidesSensorEntityDescription(
+        key="meteo_apd",
+        name="Average Wave Period",
+        icon="mdi:wave",
+        native_unit_of_measurement="s",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    "meteo_mwd": NoaaTidesSensorEntityDescription(
+        key="meteo_mwd",
+        name="Wave Direction",
+        native_unit_of_measurement=DEGREE,
+        icon="mdi:compass",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    "meteo_wtmp": NoaaTidesSensorEntityDescription(
+        key="meteo_wtmp",
+        name="Water Temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfTemperature.CELSIUS,
+        unit_imperial=UnitOfTemperature.FAHRENHEIT,
+    ),
+    # Add more NDBC sensor types as needed
+}
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> bool:
+    """Set up NOAA Tides sensors based on a config entry."""
+    coordinator: NoaaTidesDataUpdateCoordinator = hass.data[const.DOMAIN][
+        entry.entry_id
+    ]
+
+    # Get the user-configured name from the config entry
+    station_name = entry.data.get("name", "").lower().replace(" ", "_")
+
+    # Determine which sensor descriptions to use based on hub type
+    sensor_types = (
+        NOAA_SENSOR_TYPES
+        if coordinator.hub_type == const.HUB_TYPE_NOAA
+        else NDBC_SENSOR_TYPES
+    )
+
+    # Create sensor entities for each selected sensor using list comprehension
     entities = [
-        sensor_class_map[sensor_key](coordinator, entry)
-        for sensor_key in selected_sensors
-        if sensor_key in sensor_class_map
+        NoaaTidesSensor(
+            coordinator=coordinator,
+            description=sensor_types[sensor_id],
+            entry_id=entry.entry_id,
+            station_name=station_name,
+        )
+        for sensor_id in coordinator.selected_sensors
+        if sensor_id in sensor_types
     ]
 
     async_add_entities(entities)
+    return True
 
 
-class NOAABaseSensor(CoordinatorEntity, SensorEntity):
-    """Base representation of a NOAA sensor."""
+class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorEntity):
+    """Representation of a NOAA Tides sensor."""
 
-    def __init__(self, coordinator, entry):
-        """Initialize the sensor."""
+    entity_description: NoaaTidesSensorEntityDescription
+    _attr_has_entity_name = True
+    _attr_unique_id: str
+    _attr_device_info: DeviceInfo
+    _attr_native_unit_of_measurement: str | None
+    _attr_native_value: float | str | None = None
+    _attr_extra_state_attributes: dict[str, Any] = {}
+
+    def __init__(
+        self,
+        coordinator: NoaaTidesDataUpdateCoordinator,
+        description: NoaaTidesSensorEntityDescription,
+        entry_id: str,
+        station_name: str,
+    ) -> None:
+        """Initialize the sensor.
+
+        Args:
+            coordinator: The data update coordinator
+            description: The sensor entity description
+            entry_id: The config entry ID
+            station_name: The station name for entity ID
+        """
         super().__init__(coordinator)
-        self._entry = entry
-        self._station_id = entry.data["station_id"]
+        self.entity_description = description
+
+        # Generate a unique ID
+        self._attr_unique_id = f"{entry_id}_{description.key}"
+
+        # Set the entity ID to include station name
+        self.entity_id = f"sensor.{station_name}_{description.key}"
+
+        # Set up device info
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._station_id)},
-            name=f"NOAA Station {self._station_id}",
-            manufacturer="NOAA",
-            configuration_url=f"https://tidesandcurrents.noaa.gov/stationhome.html?id={self._station_id}"
+            identifiers={(const.DOMAIN, entry_id)},
+            name=(
+                f"NOAA Station {coordinator.station_id}"
+                if coordinator.hub_type == const.HUB_TYPE_NOAA
+                else f"NDBC Buoy {coordinator.station_id}"
+            ),
+            manufacturer=(
+                "NOAA Tides and Currents"
+                if coordinator.hub_type == const.HUB_TYPE_NOAA
+                else "NDBC"
+            ),
+            model=coordinator.hub_type,
         )
 
-    @property
-    def unique_id(self):
-        """Return a unique ID for this sensor."""
-        #  domain-stationid-sensortype
-        return f"{DOMAIN}-{self._station_id}-{self._sensor_type}"
-
-    @property
-    def name(self):
-        """Return the name of the sensor."""
-        return (
-            f"{self._entry.data['name']} {self._sensor_type.replace('_',' ').title()}"
-        )
-
-    @property
-    def available(self):
-        """Return if entity is available."""
-        return super().available and self.coordinator.data is not None
-
-
-class NOAATidesSensor(NOAABaseSensor):
-    """Sensor for displaying next tide status."""
-
-    def __init__(self, coordinator, entry):
-        """Initialize the tide state sensor."""
-        self._sensor_type = "tide_state"
-        super().__init__(coordinator, entry)
-        self._attr_icon = "mdi:waves"
-        self._attr_extra_state_attributes = {}
-
-    @property
-    def native_value(self):
-        """Return the main sensor state: next tide type and time as a combined string."""
-        data = self.coordinator.data
-        if not data:
-            return None
-        tide_time = datetime.fromisoformat(data["next_tide_time"]).strftime("%I:%M %p").lstrip("0")
-        return f"{data['next_tide_type']} at {tide_time}"
-
-    @property
-    def extra_state_attributes(self):
-        """Calculate and return tide factor along with other attributes."""
-        data = self.coordinator.data
-        if not data:
-            return {}
-
-        now = datetime.utcnow()
-
-        try:
-            next_tide_time = datetime.fromisoformat(data.get("next_tide_time"))
-            last_tide_time = datetime.fromisoformat(data.get("last_tide_time"))
-        except (TypeError, ValueError):
-            return {}
-
-        # Update attributes from data
-        attributes = {
-            "current_tide_event": data.get("current_tide_event"),
-            "next_tide_type": data.get("next_tide_type"),
-            "next_tide_time": next_tide_time.strftime("%I:%M %p"),
-            "last_tide_type": data.get("last_tide_type"),
-            "last_tide_time": last_tide_time.strftime("%I:%M %p"),
-            "next_tide_level": data.get("next_tide_level"),
-            "last_tide_level": data.get("last_tide_level"),
-        }
-
-        # Calculate tide factor
-        predicted_period = (next_tide_time - last_tide_time).total_seconds()
-        elapsed_time = (now - last_tide_time).total_seconds()
-
-        if elapsed_time < 0 or elapsed_time > predicted_period:
-            return attributes  # Avoid calculations if time is out of range
-
-        if attributes["next_tide_type"] == "High":
-            tide_factor = 50 - (
-                50 * math.cos(elapsed_time * math.pi / predicted_period)
+        # Set up unit of measurement based on configured unit system
+        if description.unit_metric and description.unit_imperial:
+            self._attr_native_unit_of_measurement = (
+                description.unit_metric
+                if coordinator.unit_system == const.UNIT_METRIC
+                else description.unit_imperial
             )
         else:
-            tide_factor = 50 + (
-                50 * math.cos(elapsed_time * math.pi / predicted_period)
+            self._attr_native_unit_of_measurement = (
+                description.native_unit_of_measurement
             )
 
-        # calculate tide percentage
-        tide_percentage = (elapsed_time / predicted_period) * 50
-        if attributes["next_tide_type"] == "High":
-            tide_percentage += 50
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        if (
+            self.coordinator.data is not None
+            and self.entity_description.key in self.coordinator.data
+        ):
+            sensor_data: SensorData = self.coordinator.data[self.entity_description.key]
+            self._attr_native_value = sensor_data.get("state")
+            self._attr_extra_state_attributes = sensor_data.get("attributes", {})
 
-        attributes["tide_factor"] = round(tide_factor, 2)
-        attributes["tide_percentage"] = round(tide_percentage, 2)
-
-        return attributes
-
-
-class NOAAMeasuredLevelSensor(NOAABaseSensor):
-    """Sensor for displaying the measured water level."""
-
-    def __init__(self, coordinator, entry):
-        """Initialize the sensor."""
-        self._sensor_type = "measured_level"
-        super().__init__(coordinator, entry)
-        self._attr_icon = "mdi:waves-arrow-up"
-        self._attr_state_class = "measurement"
+        self.async_write_ha_state()
 
     @property
-    def native_value(self):
-        """Return the measured water level."""
-        data = self.coordinator.data
-        if not data:
-            return None
-        return data.get("measured_level")
+    def available(self) -> bool:
+        """Return if entity is available."""
+        if self.coordinator.data is None:
+            return False
 
-    @property
-    def native_unit_of_measurement(self):
-        """Return the unit of measurement."""
-        if self.coordinator.unit_system.lower() == "imperial":
-            return "ft"
-        return "m"
+        # Check if the key exists in coordinator data
+        if self.entity_description.key not in self.coordinator.data:
+            return False
 
+        # Get the state value
+        state = self.coordinator.data[self.entity_description.key].get("state")
 
-class NOAAWaterTempSensor(NOAABaseSensor):
-    """Sensor for water temperature."""
-
-    def __init__(self, coordinator, entry):
-        self._sensor_type = "water_temp"
-        super().__init__(coordinator, entry)
-        self._attr_icon = "mdi:coolant-temperature"
-        self._attr_device_class = "temperature"
-        self._attr_state_class = "measurement"
-
-    @property
-    def native_unit_of_measurement(self):
-        """Return the unit of measurement."""
-        if self.coordinator.unit_system.lower() == "imperial":
-            return UnitOfTemperature.FAHRENHEIT
-        return UnitOfTemperature.CELSIUS
-
-    @property
-    def native_value(self):
-        """Return the water temperature."""
-        data = self.coordinator.data
-        if not data:
-            return None
-        return data.get("water_temperature")
-
-
-class NOAAAirTempSensor(NOAABaseSensor):
-    """Sensor for air temperature."""
-
-    def __init__(self, coordinator, entry):
-        self._sensor_type = "air_temp"
-        super().__init__(coordinator, entry)
-        self._attr_icon = "mdi:thermometer"
-        self._attr_device_class = "temperature"
-        self._attr_state_class = "measurement"
-
-    @property
-    def native_unit_of_measurement(self):
-        """Return the unit of measurement."""
-        if self.coordinator.unit_system.lower() == "imperial":
-            return UnitOfTemperature.FAHRENHEIT
-        return UnitOfTemperature.CELSIUS
-
-    @property
-    def native_value(self):
-        """Return the air temperature."""
-        data = self.coordinator.data
-        if not data:
-            return None
-        return data.get("air_temperature")
+        # Return True if state is either a non-empty string or a non-None number
+        return bool(state) if isinstance(state, str) else state is not None
