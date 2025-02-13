@@ -54,7 +54,7 @@ class TidePredictionAttributes(TypedDict):
 class TidePredictionData(TypedDict):
     """Type for complete tide prediction data."""
 
-    state: Literal["rising", "falling"]
+    state: str
     attributes: TidePredictionAttributes
 
 
