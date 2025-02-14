@@ -165,26 +165,23 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
     "meteo_wspd": NoaaTidesSensorEntityDescription(
         key="meteo_wspd",
         name="Wind Speed",
+        native_unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
         device_class=SensorDeviceClass.WIND_SPEED,
         state_class=SensorStateClass.MEASUREMENT,
-        unit_metric=UnitOfSpeed.METERS_PER_SECOND,
-        unit_imperial=UnitOfSpeed.MILES_PER_HOUR,
     ),
     "meteo_gst": NoaaTidesSensorEntityDescription(
         key="meteo_gst",
         name="Wind Gust",
+        native_unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
         device_class=SensorDeviceClass.WIND_SPEED,
         state_class=SensorStateClass.MEASUREMENT,
-        unit_metric=UnitOfSpeed.METERS_PER_SECOND,
-        unit_imperial=UnitOfSpeed.MILES_PER_HOUR,
     ),
     "meteo_wvht": NoaaTidesSensorEntityDescription(
         key="meteo_wvht",
         name="Wave Height",
+        native_unit_of_measurement=UnitOfLength.METERS,
         icon="mdi:waves",
         state_class=SensorStateClass.MEASUREMENT,
-        unit_metric=UnitOfLength.METERS,
-        unit_imperial=UnitOfLength.FEET,
     ),
     "meteo_dpd": NoaaTidesSensorEntityDescription(
         key="meteo_dpd",
@@ -210,12 +207,10 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
     "meteo_wtmp": NoaaTidesSensorEntityDescription(
         key="meteo_wtmp",
         name="Water Temperature",
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
-        unit_metric=UnitOfTemperature.CELSIUS,
-        unit_imperial=UnitOfTemperature.FAHRENHEIT,
     ),
-    # Add more NDBC sensor types as needed
 }
 
 
@@ -306,17 +301,64 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
             model=coordinator.hub_type,
         )
 
-        # Set up unit of measurement based on configured unit system
-        if description.unit_metric and description.unit_imperial:
-            self._attr_native_unit_of_measurement = (
-                description.unit_metric
-                if coordinator.unit_system == const.UNIT_METRIC
-                else description.unit_imperial
-            )
+        # Set the native unit of measurement based on unit system and sensor type
+        if coordinator.hub_type == const.HUB_TYPE_NDBC:
+            # Handle NDBC sensors
+            if coordinator.unit_system == const.UNIT_IMPERIAL:
+                if description.key.endswith(("_wspd", "_gst")):
+                    self._attr_native_unit_of_measurement = UnitOfSpeed.MILES_PER_HOUR
+                elif description.key.endswith(("_atmp", "_wtmp", "_dewp")):
+                    self._attr_native_unit_of_measurement = UnitOfTemperature.FAHRENHEIT
+                elif description.key.endswith("_wvht"):
+                    self._attr_native_unit_of_measurement = UnitOfLength.FEET
+                elif description.key.endswith("_pres"):
+                    self._attr_native_unit_of_measurement = UnitOfPressure.INHG
+                else:
+                    # For sensors that don't need conversion (directions, periods)
+                    self._attr_native_unit_of_measurement = (
+                        description.native_unit_of_measurement
+                    )
+            else:
+                # Keep metric units as is
+                self._attr_native_unit_of_measurement = (
+                    description.native_unit_of_measurement
+                )
         else:
-            self._attr_native_unit_of_measurement = (
-                description.native_unit_of_measurement
-            )
+            # Handle NOAA sensors - use description's unit configuration
+            if description.unit_metric and description.unit_imperial:
+                self._attr_native_unit_of_measurement = (
+                    description.unit_metric
+                    if coordinator.unit_system == const.UNIT_METRIC
+                    else description.unit_imperial
+                )
+            else:
+                self._attr_native_unit_of_measurement = (
+                    description.native_unit_of_measurement
+                )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        if (
+            self.coordinator.data is not None
+            and self.entity_description.key in self.coordinator.data
+        ):
+            sensor_data: SensorData = self.coordinator.data[self.entity_description.key]
+            self._attr_native_value = sensor_data.get("state")
+            self._attr_extra_state_attributes = sensor_data.get("attributes", {})
+
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        if self.coordinator.data is None:
+            return False
+        return (
+            self.entity_description.key in self.coordinator.data
+            and self.coordinator.data[self.entity_description.key].get("state")
+            is not None
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:
