@@ -16,6 +16,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from . import const
 
+from .utils import degrees_to_cardinal
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -696,13 +698,33 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
                                     # No conversion needed for directions (WDIR, MWD) or periods (DPD, APD)
 
-                                result[sensor_id] = {
-                                    "state": value,
-                                    "attributes": {
-                                        "raw_value": data[i],
-                                        "unit": units[i] if i < len(units) else None,
-                                    },
-                                }
+                            # Initialize empty attributes dictionary
+                            attributes = {}
+
+                            # Add attributes based on sensor type
+                            if header in ["WDIR", "MWD"]:  # Direction sensors
+                                cardinal = degrees_to_cardinal(value)
+                                if cardinal:
+                                    attributes["direction_cardinal"] = cardinal
+                            elif header in [
+                                "WSPD",
+                                "GST",
+                                "WVHT",
+                                "PRES",
+                                "ATMP",
+                                "WTMP",
+                                "DEWP",
+                            ]:
+                                # Only add raw value and unit for sensors where these are meaningful
+                                attributes["raw_value"] = data[i]
+                                attributes["unit"] = (
+                                    units[i] if i < len(units) else None
+                                )
+
+                            result[sensor_id] = {
+                                "state": value,
+                                "attributes": attributes,
+                            }
                         except (ValueError, IndexError):
                             _LOGGER.debug(
                                 "Invalid data for sensor %s: %s",
