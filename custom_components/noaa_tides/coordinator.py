@@ -274,9 +274,14 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 if next_tide["type"] == "H":
                     tide_percentage += 50
 
+                # Format the tide state to show next tide and time
+                next_tide_type = "High" if next_tide["type"] == "H" else "Low"
+                next_tide_time = next_tide["time"].strftime("%-I:%M %p")
+                tide_state = f"{next_tide_type} tide at {next_tide_time}"
+
                 return {
                     "tide_predictions": {
-                        "state": "rising" if next_tide["type"] == "H" else "falling",
+                        "state": tide_state,
                         "attributes": {
                             const.ATTR_NEXT_TIDE_TYPE: "High"
                             if next_tide["type"] == "H"
@@ -669,8 +674,30 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     if sensor_id in self.selected_sensors:
                         try:
                             if i < len(data) and data[i] != "MM" and data[i] != "999":
+                                value = float(data[i])
+
+                                # Convert values if imperial units are requested
+                                if self.unit_system == const.UNIT_IMPERIAL:
+                                    # Temperature conversions (ATMP, WTMP, DEWP) - Celsius to Fahrenheit (°F = °C * 9/5 + 32)
+                                    if header in ["ATMP", "WTMP", "DEWP"]:
+                                        value = (value * 9 / 5) + 32
+
+                                    # Wind speed and gust conversions (WSPD, GST) - m/s to mph (1 m/s = 2.23694 mph)
+                                    elif header in ["WSPD", "GST"]:
+                                        value = value * 2.23694
+
+                                    # Wave height conversion (WVHT) - meters to feet (1 m = 3.28084 ft)
+                                    elif header == "WVHT":
+                                        value = value * 3.28084
+
+                                    # Pressure conversion (PRES) - hPa to inHg (1 hPa = 0.02953 inHg)
+                                    elif header == "PRES":
+                                        value = value * 0.02953
+
+                                    # No conversion needed for directions (WDIR, MWD) or periods (DPD, APD)
+
                                 result[sensor_id] = {
-                                    "state": float(data[i]),
+                                    "state": value,
                                     "attributes": {
                                         "raw_value": data[i],
                                         "unit": units[i] if i < len(units) else None,
