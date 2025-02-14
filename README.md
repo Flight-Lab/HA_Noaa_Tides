@@ -24,7 +24,7 @@ A custom component for Home Assistant that provides real-time tidal, current, an
 - Water Level
 - Tide Predictions (with tide state, timing, factor, and percentage)
 - Current Speed and Direction
-- Current Predictions (experimental)
+- Current Predictions (expiremental)
 - Water Temperature
 - Air Temperature
 - Wind Speed and Direction
@@ -35,7 +35,7 @@ A custom component for Home Assistant that provides real-time tidal, current, an
 ### NDBC Buoy Sensors
 - Meteorological Data
   - Wind Speed, Direction, and Gusts
-  - Wave Height and Period
+  - Wave Height, Period, and Direction
   - Air Temperature
   - Water Temperature
   - Barometric Pressure
@@ -101,7 +101,7 @@ NDBC and it's partners operate nearly 1000 active buoys and coastal stations wor
 - **Tide Factor**: Sinusoidal representation of tide level (0-100%)
 - **Tide Percentage**: Linear representation of tide progress (0-100%)
 
-### Current Predictions (experimental)
+### Current Predictions (expiremental)
 - **Current State**: Shows ebb, flood, or slack water
 - **Direction**: Compass bearing of water movement
 - **Speed**: Current velocity
