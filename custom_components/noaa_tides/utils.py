@@ -306,3 +306,39 @@ async def discover_ndbc_sensors(
     except Exception as err:
         _LOGGER.error("Error discovering NDBC sensors: %s", err)
         return {}
+
+
+def degrees_to_cardinal(degrees: float | None) -> str | None:
+    """Convert degrees to cardinal direction.
+
+    Args:
+        degrees: Direction in degrees from 0-360
+
+    Returns:
+        str: Cardinal direction (N, NNE, NE, etc.) or None if degrees is None
+    """
+    if degrees is None:
+        return None
+
+    directions = [
+        "N",
+        "NNE",
+        "NE",
+        "ENE",
+        "E",
+        "ESE",
+        "SE",
+        "SSE",
+        "S",
+        "SSW",
+        "SW",
+        "WSW",
+        "W",
+        "WNW",
+        "NW",
+        "NNW",
+    ]
+
+    # Convert degrees to 0-15 range for array index
+    index = int((degrees + 11.25) / 22.5) % 16
+    return directions[index]
