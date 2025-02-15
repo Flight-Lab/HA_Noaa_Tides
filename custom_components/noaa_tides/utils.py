@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 import logging
 from typing import Any, Final, TypedDict, cast
 
@@ -56,6 +55,7 @@ async def validate_noaa_station(hass: HomeAssistant, station_id: str) -> bool:
 
     Returns:
         bool: True if station is valid, False otherwise
+
     """
     try:
         session = async_get_clientsession(hass)
@@ -297,8 +297,102 @@ async def discover_ndbc_sensors(
                                             meteo_mapping[header],
                                         )
 
-            # Similar changes needed for spectral wave and ocean current sections...
-            # [Previous spectral wave and ocean current code remains the same]
+            elif section == const.DATA_SPECTRAL_WAVE:
+                # Mapping of spectral wave headers to sensor names
+                wave_mapping: Final[dict[str, str]] = {
+                    "WVHT": "Wave Height",
+                    "SwH": "Swell Height",
+                    "SwP": "Swell Period",
+                    "WWH": "Wind Wave Height",
+                    "WWP": "Wind Wave Period",
+                    "SwD": "Swell Direction",
+                    "WWD": "Wind Wave Direction",
+                    "STEEPNESS": "Wave Steepness",
+                    "APD": "Average Wave Period",
+                    "MWD": "Mean Wave Direction",
+                }
+
+                url = const.NDBC_SPEC_URL.format(buoy_id=buoy_id)
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        text = await response.text()
+                        lines = text.strip().split("\n")
+                        if len(lines) >= 2:  # Need header and at least one data line
+                            headers = lines[0].strip().split()
+                            # Get recent data lines for validation
+                            data_lines = [line.strip().split() for line in lines[1:6]]
+
+                            for i, header in enumerate(headers):
+                                if header in wave_mapping:
+                                    # Validate sensor data
+                                    valid_readings = False
+                                    for data_line in data_lines:
+                                        try:
+                                            if (
+                                                i < len(data_line)
+                                                and data_line[i] != "MM"
+                                                and data_line[i] != "999.0"
+                                                and data_line[i] != "999"
+                                                and float(data_line[i])
+                                            ):
+                                                valid_readings = True
+                                                break
+                                        except ValueError:
+                                            continue
+
+                                    if valid_readings:
+                                        sensor_id = f"spec_wave_{header.lower()}"
+                                        sensors[sensor_id] = wave_mapping[header]
+                                        _LOGGER.debug(
+                                            "Added NDBC spectral wave sensor: %s -> %s",
+                                            sensor_id,
+                                            wave_mapping[header],
+                                        )
+
+            elif section == const.DATA_OCEAN_CURRENT:
+                # Mapping of ocean current headers to sensor names
+                current_mapping: Final[dict[str, str]] = {
+                    "DEPTH": "Current Depth",
+                    "DRCT": "Current Direction",
+                    "SPDD": "Current Speed",
+                }
+
+                url = const.NDBC_CURRENT_URL.format(buoy_id=buoy_id)
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        text = await response.text()
+                        lines = text.strip().split("\n")
+                        if len(lines) >= 2:  # Need header and at least one data line
+                            headers = lines[0].strip().split()
+                            # Get recent data lines for validation
+                            data_lines = [line.strip().split() for line in lines[1:6]]
+
+                            for i, header in enumerate(headers):
+                                if header in current_mapping:
+                                    # Validate sensor data
+                                    valid_readings = False
+                                    for data_line in data_lines:
+                                        try:
+                                            if (
+                                                i < len(data_line)
+                                                and data_line[i] != "MM"
+                                                and data_line[i] != "999.0"
+                                                and data_line[i] != "999"
+                                                and float(data_line[i])
+                                            ):
+                                                valid_readings = True
+                                                break
+                                        except ValueError:
+                                            continue
+
+                                    if valid_readings:
+                                        sensor_id = f"current_{header.lower()}"
+                                        sensors[sensor_id] = current_mapping[header]
+                                        _LOGGER.debug(
+                                            "Added NDBC ocean current sensor: %s -> %s",
+                                            sensor_id,
+                                            current_mapping[header],
+                                        )
 
         _LOGGER.debug("Final discovered sensors for buoy %s: %s", buoy_id, sensors)
         return sensors
