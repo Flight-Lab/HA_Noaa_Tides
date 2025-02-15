@@ -8,13 +8,13 @@ import logging
 import math
 from typing import Any, Final, Literal, NotRequired, TypedDict
 
-import aiohttp
-
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from . import const
+
+from .utils import degrees_to_cardinal
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -94,7 +94,6 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def __init__(
         self,
         hass: HomeAssistant,
-        *,
         hub_type: Literal[const.HUB_TYPE_NOAA, const.HUB_TYPE_NDBC],
         station_id: str,
         selected_sensors: list[str],
@@ -274,9 +273,14 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 if next_tide["type"] == "H":
                     tide_percentage += 50
 
+                # Format the tide state to show next tide and time
+                next_tide_type = "High" if next_tide["type"] == "H" else "Low"
+                next_tide_time = next_tide["time"].strftime("%-I:%M %p")
+                tide_state = f"{next_tide_type} tide at {next_tide_time}"
+
                 return {
                     "tide_predictions": {
-                        "state": "rising" if next_tide["type"] == "H" else "falling",
+                        "state": tide_state,
                         "attributes": {
                             const.ATTR_NEXT_TIDE_TYPE: "High"
                             if next_tide["type"] == "H"
@@ -310,7 +314,14 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             return {}
 
     async def _fetch_noaa_sensor_data(self, sensor_type: str) -> dict[str, Any]:
-        """Fetch data for a specific NOAA sensor."""
+        """Fetch data for a specific NOAA sensor.
+
+        Args:
+            sensor_type: The type of sensor to fetch data for (e.g., 'water_level')
+
+        Returns:
+            dict[str, Any]: Dictionary containing the sensor data if available
+        """
         params = {
             "station": self.station_id,
             "product": sensor_type,
@@ -326,7 +337,11 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         try:
             _LOGGER.debug(
-                "Fetching NOAA sensor data for %s with params: %s", sensor_type, params
+                "Fetching NOAA sensor data for %s with params: %s",
+                sensor_type,
+                {
+                    k: v for k, v in params.items() if k != "format"
+                },  # Exclude format for cleaner logs
             )
 
             async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
@@ -339,7 +354,6 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     return {}
 
                 data = await response.json()
-                _LOGGER.debug("Received data for %s: %s", sensor_type, data)
 
                 if not data.get("data"):
                     _LOGGER.error(
@@ -348,6 +362,16 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     return {}
 
                 latest = data["data"][0]
+
+                # Only log the latest data point for water level at debug level
+                if sensor_type == "water_level":
+                    _LOGGER.debug(
+                        "Latest water level reading - Value: %s %s, Time: %s, Datum: MLLW",
+                        latest.get("v", "N/A"),
+                        "meters" if self.unit_system == const.UNIT_METRIC else "feet",
+                        latest.get("t", "N/A"),
+                    )
+
                 return {
                     sensor_type: {
                         "state": float(latest.get("v", 0)),
@@ -373,12 +397,8 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         1. Predictions with explicit Type (slack/ebb/flood)
         2. Predictions with just Velocity_Major where direction must be inferred
 
-        The method determines the current state based on either:
-        - The explicit Type field if available
-        - The Velocity_Major value where:
-            - Velocity > 0: flood (water moving inland)
-            - Velocity < 0: ebb (water moving seaward)
-            - -0.1 <= Velocity <= 0.1: slack (minimal current)
+        Returns:
+            dict[str, Any]: Dictionary containing currents prediction data if available
         """
         params = {
             "station": self.station_id,
@@ -398,7 +418,6 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     )
 
                 data = await response.json()
-                _LOGGER.debug("Raw currents prediction response: %s", data)
 
                 # Get the predictions array
                 predictions = data.get("current_predictions", {}).get("cp", [])
@@ -409,7 +428,17 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
                 # Get the most recent prediction
                 latest = predictions[0]
-                _LOGGER.debug("Latest prediction data: %s", latest)
+
+                # Log only relevant fields from the latest prediction
+                _LOGGER.debug(
+                    "Latest currents prediction - Time: %s, Velocity: %s, Type: %s, "
+                    "Flood Dir: %s, Ebb Dir: %s",
+                    latest.get("Time", "N/A"),
+                    latest.get("Velocity_Major", "N/A"),
+                    latest.get("Type", "N/A"),
+                    latest.get("meanFloodDir", "N/A"),
+                    latest.get("meanEbbDir", "N/A"),
+                )
 
                 # Extract common values
                 time = latest.get("Time", "")
@@ -446,7 +475,18 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                         },
                     }
                 }
-                _LOGGER.debug("Returning currents prediction data: %s", return_data)
+
+                # Log the processed and structured return data
+                _LOGGER.debug(
+                    "Processed currents prediction - State: %s, Direction: %.1f°, "
+                    "Speed: %.2f %s, Time: %s",
+                    type_value,
+                    direction,
+                    abs(velocity),
+                    "m/s" if self.unit_system == const.UNIT_METRIC else "knots",
+                    time,
+                )
+
                 return return_data
 
         except Exception as err:
@@ -669,12 +709,55 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     if sensor_id in self.selected_sensors:
                         try:
                             if i < len(data) and data[i] != "MM" and data[i] != "999":
+                                # Round initial value to 2 decimal places
+                                value = round(float(data[i]), 2)
+
+                                # Convert values if imperial units are requested
+                                if self.unit_system == const.UNIT_IMPERIAL:
+                                    # Temperature conversions (ATMP, WTMP, DEWP) - Celsius to Fahrenheit
+                                    if header in ["ATMP", "WTMP", "DEWP"]:
+                                        value = round((value * 9 / 5) + 32, 2)
+
+                                    # Wind speed and gust conversions (WSPD, GST) - m/s to mph
+                                    elif header in ["WSPD", "GST"]:
+                                        value = round(value * 2.23694, 2)
+
+                                    # Wave height conversion (WVHT) - meters to feet
+                                    elif header == "WVHT":
+                                        value = round(value * 3.28084, 2)
+
+                                    # Pressure conversion (PRES) - hPa to inHg
+                                    elif header == "PRES":
+                                        value = round(value * 0.02953, 2)
+
+                                # Initialize empty attributes dictionary
+                                attributes = {}
+
+                                # Add attributes based on sensor type
+                                if header in ["WDIR", "MWD"]:  # Direction sensors
+                                    cardinal = degrees_to_cardinal(value)
+                                    if cardinal:
+                                        attributes["direction_cardinal"] = cardinal
+                                elif header in [
+                                    "WSPD",
+                                    "GST",
+                                    "WVHT",
+                                    "PRES",
+                                    "ATMP",
+                                    "WTMP",
+                                    "DEWP",
+                                ]:
+                                    # Store the original (unconverted) value and unit
+                                    attributes["raw_value"] = str(
+                                        round(float(data[i]), 2)
+                                    )
+                                    attributes["unit"] = (
+                                        units[i] if i < len(units) else None
+                                    )
+
                                 result[sensor_id] = {
-                                    "state": float(data[i]),
-                                    "attributes": {
-                                        "raw_value": data[i],
-                                        "unit": units[i] if i < len(units) else None,
-                                    },
+                                    "state": value,
+                                    "attributes": attributes,
                                 }
                         except (ValueError, IndexError):
                             _LOGGER.debug(
@@ -696,110 +779,187 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             url = const.NDBC_SPEC_URL.format(buoy_id=self.station_id)
             async with self.session.get(url) as response:
                 if response.status != 200:
+                    _LOGGER.error(
+                        "Error fetching spectral wave data. Status: %s", response.status
+                    )
                     return {}
 
                 text = await response.text()
                 lines = text.strip().split("\n")
 
-                if len(lines) < 2:  # Need header and at least one data line
+                if len(lines) < 3:  # Need header, units, and at least one data line
+                    _LOGGER.warning(
+                        "Insufficient data in spectral wave response for buoy %s",
+                        self.station_id,
+                    )
                     return {}
 
-                # Process the spectral wave data header
                 headers = lines[0].strip().split()
-                data = lines[1].strip().split()  # Most recent data
+                units = lines[1].strip().split()  # Units line
+                data = lines[2].strip().split()  # Most recent data line
 
                 result = {}
-                wave_data_map = {
-                    "WVHT": "wave_height",
-                    "SwH": "swell_height",
-                    "SwP": "swell_period",
-                    "WWH": "wind_wave_height",
-                    "WWP": "wind_wave_period",
-                    "SwD": "swell_direction",
-                    "WWD": "wind_wave_direction",
-                    "STEEPNESS": "wave_steepness",
-                    "APD": "average_wave_period",
-                    "MWD": "mean_wave_direction",
-                }
-
                 for i, header in enumerate(headers):
-                    if (
-                        i < len(data)
-                        and data[i] != "MM"
-                        and header in wave_data_map
-                        and wave_data_map[header] in self.selected_sensors
-                    ):
-                        try:
-                            value = float(data[i])
-                            sensor_id = f"wave_{wave_data_map[header]}"
+                    sensor_id = f"spec_wave_{header.lower()}"
+                    if sensor_id not in self.selected_sensors:
+                        continue
+
+                    try:
+                        if i < len(data) and data[i] not in [
+                            "MM",
+                            "999",
+                            "999.0",
+                            "",
+                            "N/A",
+                        ]:
+                            # Round initial value to 2 decimal places
+                            value = round(float(data[i]), 2)
+
+                            # Convert values if imperial units are requested
+                            if self.unit_system == const.UNIT_IMPERIAL:
+                                # Wave height conversions (WVHT, SwH, WWH) - meters to feet
+                                if header in ["WVHT", "SwH", "WWH"]:
+                                    value = round(value * 3.28084, 2)
+
+                            # Initialize empty attributes dictionary
+                            attributes = {}
+
+                            # Add attributes based on sensor type
+                            if header in ["SwD", "WWD", "MWD"]:  # Direction sensors
+                                cardinal = degrees_to_cardinal(value)
+                                if cardinal:
+                                    attributes["direction_cardinal"] = cardinal
+                            elif header in ["WVHT", "SwH", "WWH"]:
+                                # Store the original (unconverted) value and unit
+                                attributes["raw_value"] = str(round(float(data[i]), 2))
+                                attributes["unit"] = (
+                                    units[i] if i < len(units) else None
+                                )
+
                             result[sensor_id] = {
                                 "state": value,
-                                "attributes": {
-                                    "raw_value": data[i],
-                                    "parameter": header,
-                                },
+                                "attributes": attributes,
                             }
-                        except ValueError:
-                            continue
+                    except (ValueError, IndexError):
+                        _LOGGER.debug(
+                            "Invalid data for sensor %s: %s",
+                            sensor_id,
+                            data[i] if i < len(data) else "missing",
+                        )
+                        continue
 
+                _LOGGER.debug(
+                    "Spectral wave sensors processed: %s", list(result.keys())
+                )
                 return result
 
         except Exception as err:
-            _LOGGER.error("Error fetching NDBC spectral wave data: %s", err)
+            _LOGGER.error(
+                "Error processing spectral wave data for buoy %s: %s",
+                self.station_id,
+                err,
+            )
             return {}
 
     async def _fetch_ndbc_ocean_current(self) -> dict[str, Any]:
-        """Fetch ocean current data from NDBC."""
+        """Fetch ocean current data from NDBC.
+
+        Not all NDBC buoys have current sensors, so handle 404 errors gracefully.
+
+        Returns:
+            dict[str, Any]: Dictionary containing ocean current sensor data if available
+        """
         try:
+            session = async_get_clientsession(self.hass)
             url = const.NDBC_CURRENT_URL.format(buoy_id=self.station_id)
-            async with self.session.get(url) as response:
+
+            async with session.get(url) as response:
+                if response.status == 404:
+                    _LOGGER.debug(
+                        "Ocean current data not available for buoy %s - this is normal as not all buoys have current sensors",
+                        self.station_id,
+                    )
+                    return {}
+
                 if response.status != 200:
+                    _LOGGER.error(
+                        "Error fetching ocean current data for buoy %s. Status: %s",
+                        self.station_id,
+                        response.status,
+                    )
                     return {}
 
                 text = await response.text()
                 lines = text.strip().split("\n")
 
                 if len(lines) < 2:  # Need header and at least one data line
+                    _LOGGER.debug(
+                        "Insufficient ocean current data for buoy %s",
+                        self.station_id,
+                    )
                     return {}
 
                 headers = lines[0].strip().split()
-                data = lines[1].strip().split()  # Most recent data
+                # Get recent data lines for validation
+                data_lines = [line.strip().split() for line in lines[1:6]]
 
                 result = {}
-                current_data_map = {
-                    "DEPTH": "current_depth",
-                    "DRCT": "current_direction",
-                    "SPDD": "current_speed",
-                }
-
                 for i, header in enumerate(headers):
-                    if (
-                        i < len(data)
-                        and data[i] != "MM"
-                        and header in current_data_map
-                        and current_data_map[header] in self.selected_sensors
-                    ):
+                    # Create sensor_id in the same format as utils.py discovery
+                    sensor_id = f"current_{header.lower()}"
+                    if sensor_id not in self.selected_sensors:
+                        continue
+
+                    # Validate sensor data across recent readings
+                    valid_readings = False
+                    latest_value = None
+
+                    for data_line in data_lines:
                         try:
-                            value = float(data[i])
-                            # Convert speed from cm/s to m/s for metric
                             if (
-                                header == "SPDD"
-                                and self.unit_system == const.UNIT_METRIC
+                                i < len(data_line)
+                                and data_line[i]
+                                not in ["MM", "999", "999.0", "", "N/A"]
+                                and float(data_line[i])
                             ):
-                                value = value / 100
-                            sensor_id = current_data_map[header]
-                            result[sensor_id] = {
-                                "state": value,
-                                "attributes": {
-                                    "raw_value": data[i],
-                                    "parameter": header,
-                                },
-                            }
-                        except ValueError:
+                                valid_readings = True
+                                if latest_value is None:  # Store first valid reading
+                                    latest_value = float(data_line[i])
+                                break
+                        except (ValueError, IndexError):
                             continue
 
+                    if valid_readings and latest_value is not None:
+                        # Initialize empty attributes dictionary
+                        attributes = {}
+
+                        # Add attributes based on sensor type
+                        if header == "DRCT":  # Direction sensors
+                            attributes["direction_cardinal"] = degrees_to_cardinal(
+                                latest_value
+                            )
+                        elif header in ["DEPTH", "SPDD"]:  # Measurement sensors
+                            attributes["raw_value"] = str(latest_value)
+                            attributes["units"] = (
+                                "meters" if header == "DEPTH" else "m/s"
+                            )
+
+                        result[sensor_id] = {
+                            "state": latest_value,
+                            "attributes": attributes,
+                        }
+
+                _LOGGER.debug(
+                    "Ocean current sensors processed for buoy %s: %s",
+                    self.station_id,
+                    list(result.keys()),
+                )
                 return result
 
         except Exception as err:
-            _LOGGER.error("Error fetching NDBC ocean current data: %s", err)
+            _LOGGER.error(
+                "Error processing ocean current data for buoy %s: %s",
+                self.station_id,
+                err,
+            )
             return {}
