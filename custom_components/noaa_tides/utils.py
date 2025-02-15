@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import logging
-from typing import Any, Final, TypedDict, cast
+from typing import Any, Final, Optional, TypedDict, cast
 
 import aiohttp
 
@@ -46,6 +47,135 @@ class NdbcHeaderData(TypedDict):
     TIDE: str
 
 
+@dataclass
+class ApiError:
+    """Class to represent API errors with user-friendly messages."""
+
+    code: str
+    message: str
+    technical_detail: Optional[str] = None
+    help_url: Optional[str] = None
+
+
+async def handle_noaa_api_error(error: Exception, station_id: str) -> ApiError:
+    """Handle NOAA API errors and return user-friendly messages."""
+    if isinstance(error, asyncio.TimeoutError):
+        return ApiError(
+            code="timeout",
+            message=f"Station {station_id}: Connection timed out. Please check your internet connection.",
+            technical_detail=str(error),
+            help_url="https://tidesandcurrents.noaa.gov/stations.html",
+        )
+
+    if isinstance(error, aiohttp.ClientResponseError):
+        if error.status == 404:
+            return ApiError(
+                code="station_not_found",
+                message=f"Station {station_id}: Not found. Please verify the station ID.",
+                help_url="https://tidesandcurrents.noaa.gov/stations.html",
+            )
+        if error.status in (500, 502, 503, 504):
+            return ApiError(
+                code="server_error",
+                message=f"Station {station_id}: NOAA service is temporarily unavailable. Please try again later.",
+                technical_detail=f"Status: {error.status}",
+            )
+        if error.status == 429:
+            return ApiError(
+                code="rate_limit",
+                message=f"Station {station_id}: Too many requests to NOAA API. Please try again later.",
+                technical_detail=f"Status: {error.status}",
+            )
+        return ApiError(
+            code=f"http_error_{error.status}",
+            message=f"Station {station_id}: Unexpected HTTP error occurred.",
+            technical_detail=f"Status: {error.status}",
+        )
+
+    if isinstance(error, aiohttp.ClientConnectionError):
+        return ApiError(
+            code="connection_error",
+            message=f"Station {station_id}: Could not connect to NOAA service. Please check your internet connection.",
+            technical_detail=str(error),
+        )
+
+    if isinstance(error, ValueError):
+        return ApiError(
+            code="invalid_data",
+            message=f"Station {station_id}: Received invalid data from NOAA service.",
+            technical_detail=str(error),
+        )
+
+    return ApiError(
+        code="unknown",
+        message=f"Station {station_id}: An unexpected error occurred while connecting to NOAA.",
+        technical_detail=str(error),
+    )
+
+
+async def handle_ndbc_api_error(error: Exception, buoy_id: str) -> ApiError:
+    """Handle NDBC API errors and return user-friendly messages."""
+    if isinstance(error, asyncio.TimeoutError):
+        return ApiError(
+            code="timeout",
+            message=f"Buoy {buoy_id}: Connection timed out. Please check your internet connection.",
+            technical_detail=str(error),
+            help_url="https://www.ndbc.noaa.gov/stations.shtml",
+        )
+
+    if isinstance(error, aiohttp.ClientResponseError):
+        if error.status == 404:
+            return ApiError(
+                code="buoy_not_found",
+                message=f"Buoy {buoy_id}: Not found. Please verify the buoy ID.",
+                help_url="https://www.ndbc.noaa.gov/stations.shtml",
+            )
+        if error.status in (500, 502, 503, 504):
+            return ApiError(
+                code="server_error",
+                message=f"Buoy {buoy_id}: NDBC service is temporarily unavailable. Please try again later.",
+                technical_detail=f"Status: {error.status}",
+            )
+        if error.status == 429:
+            return ApiError(
+                code="rate_limit",
+                message=f"Buoy {buoy_id}: Too many requests to NDBC API. Please try again later.",
+                technical_detail=f"Status: {error.status}",
+            )
+        return ApiError(
+            code=f"http_error_{error.status}",
+            message=f"Buoy {buoy_id}: Unexpected HTTP error occurred.",
+            technical_detail=f"Status: {error.status}",
+        )
+
+    if isinstance(error, aiohttp.ClientConnectionError):
+        return ApiError(
+            code="connection_error",
+            message=f"Buoy {buoy_id}: Could not connect to NDBC service. Please check your internet connection.",
+            technical_detail=str(error),
+        )
+
+    if isinstance(error, ValueError):
+        return ApiError(
+            code="invalid_data",
+            message=f"Buoy {buoy_id}: Received invalid data from NDBC service.",
+            technical_detail=str(error),
+        )
+
+    if isinstance(error, UnicodeDecodeError):
+        return ApiError(
+            code="decode_error",
+            message=f"Buoy {buoy_id}: Could not read NDBC data format.",
+            technical_detail=str(error),
+        )
+
+    return ApiError(
+        code="unknown",
+        message=f"Buoy {buoy_id}: An unexpected error occurred while connecting to NDBC.",
+        technical_detail=str(error),
+    )
+
+
 async def validate_noaa_station(hass: HomeAssistant, station_id: str) -> bool:
     """Validate a NOAA station ID by checking the products endpoint.
 
@@ -68,7 +198,7 @@ async def validate_noaa_station(hass: HomeAssistant, station_id: str) -> bool:
             return bool(data.get("products"))
 
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
-        _LOGGER.error("Error validating NOAA station %s: %s", station_id, err)
+        _LOGGER.error("Station %s: Error validating: %s", station_id, err)
         return False
 
 
@@ -113,7 +243,9 @@ async def validate_ndbc_buoy(
         valid_responses = 0
         for response in responses:
             if isinstance(response, Exception):
-                _LOGGER.debug("Error checking NDBC buoy %s: %s", buoy_id, response)
+                _LOGGER.debug(
+                    "NDBC Buoy %s: Error checking data: %s", buoy_id, response
+                )
                 continue
 
             if response.status == 200:
@@ -123,7 +255,7 @@ async def validate_ndbc_buoy(
                         valid_responses += 1
                 except Exception as err:
                     _LOGGER.debug(
-                        "Error reading response for buoy %s: %s", buoy_id, err
+                        "NDBC Buoy %s: Error reading response: %s", buoy_id, err
                     )
                     continue
 
@@ -131,7 +263,7 @@ async def validate_ndbc_buoy(
         return valid_responses > 0
 
     except Exception as err:
-        _LOGGER.error("Error validating NDBC buoy %s: %s", buoy_id, err)
+        _LOGGER.error("NDBC Buoy: Error validating: %s", buoy_id, err)
         return False
 
 
@@ -145,7 +277,7 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
     Returns:
         dict[str, str]: Dictionary mapping sensor keys to display names
     """
-    _LOGGER.debug("Starting NOAA sensor discovery for station %s", station_id)
+    _LOGGER.debug("NOAA Station %s: Starting NOAA sensor discovery", station_id)
     try:
         session = async_get_clientsession(hass)
         sensors: dict[str, str] = {}
@@ -164,12 +296,14 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
                 NoaaProductResponse, await products_task.result().json()
             )
             products = products_data.get("products", [])
-            _LOGGER.debug("Found NOAA products: %s", products)
+            _LOGGER.debug("NOAA Station %s: Found products: %s", station_id, products)
 
             # Map product names to sensors
             for product in products:
                 name = product.get("name", "").lower()
-                _LOGGER.debug("Processing product name: %s", name)
+                _LOGGER.debug(
+                    "NOAA Station %s: Processing product name: %s", station_id, name
+                )
 
                 if "water levels" in name:
                     sensors["water_level"] = "Water Level"
@@ -188,11 +322,17 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
                     NoaaSensorResponse, await sensors_task.result().json()
                 )
                 available_sensors = sensors_data.get("sensors", [])
-                _LOGGER.debug("Raw sensors data: %s", sensors_data)
+                _LOGGER.debug(
+                    "NOAA Station %s: Raw sensors data: %s", station_id, sensors_data
+                )
 
                 for sensor in available_sensors:
                     sensor_name = sensor.get("name", "").lower()
-                    _LOGGER.debug("Found NOAA sensor name: %s", sensor_name)
+                    _LOGGER.debug(
+                        "NOAA Station %s: Found NOAA sensor name: %s",
+                        station_id,
+                        sensor_name,
+                    )
 
                     # Map sensor names to our sensors
                     if "water temperature" in sensor_name:
@@ -210,13 +350,19 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
                         sensors["conductivity"] = "Conductivity"
 
             except Exception as err:
-                _LOGGER.debug("Error processing sensors data: %s", err)
+                _LOGGER.debug(
+                    "NOAA Station %s: Error processing sensors data: %s",
+                    station_id,
+                    err,
+                )
 
-        _LOGGER.debug("Final discovered sensors: %s", sensors)
+        _LOGGER.debug(
+            "NOAA Station %s: Final discovered sensors: %s", station_id, sensors
+        )
         return sensors
 
     except Exception as err:
-        _LOGGER.error("Error discovering NOAA sensors: %s", err)
+        _LOGGER.error("NOAA Station %s: Error discovering sensors: %s", station_id, err)
         return {}
 
 
@@ -280,7 +426,8 @@ async def discover_ndbc_sensors(
                                             continue
 
                                     _LOGGER.debug(
-                                        "Checking sensor %s: valid_readings=%s, first_value=%s",
+                                        "NDBC Buoy %s: Checking sensor %s: valid_readings=%s, first_value=%s",
+                                        buoy_id,
                                         header,
                                         valid_readings,
                                         data_lines[0][i]
@@ -292,7 +439,8 @@ async def discover_ndbc_sensors(
                                         sensor_id = f"meteo_{header.lower()}"
                                         sensors[sensor_id] = meteo_mapping[header]
                                         _LOGGER.debug(
-                                            "Added sensor: %s -> %s",
+                                            "NDBC Buoy %s: Added sensor: %s -> %s",
+                                            buoy_id,
                                             sensor_id,
                                             meteo_mapping[header],
                                         )
@@ -344,7 +492,8 @@ async def discover_ndbc_sensors(
                                         sensor_id = f"spec_wave_{header.lower()}"
                                         sensors[sensor_id] = wave_mapping[header]
                                         _LOGGER.debug(
-                                            "Added NDBC spectral wave sensor: %s -> %s",
+                                            "NDBC Buoy %s: Added spectral wave sensor: %s -> %s",
+                                            buoy_id,
                                             sensor_id,
                                             wave_mapping[header],
                                         )
@@ -389,16 +538,17 @@ async def discover_ndbc_sensors(
                                         sensor_id = f"current_{header.lower()}"
                                         sensors[sensor_id] = current_mapping[header]
                                         _LOGGER.debug(
-                                            "Added NDBC ocean current sensor: %s -> %s",
+                                            "NDBC Buoy %s: Added ocean current sensor: %s -> %s",
+                                            buoy_id,
                                             sensor_id,
                                             current_mapping[header],
                                         )
 
-        _LOGGER.debug("Final discovered sensors for buoy %s: %s", buoy_id, sensors)
+        _LOGGER.debug("NDBC Buoy %s: Final discovered sensors: %s", buoy_id, sensors)
         return sensors
 
     except Exception as err:
-        _LOGGER.error("Error discovering NDBC sensors: %s", err)
+        _LOGGER.error("NDBC Buoy %s: Error discovering sensors: %s", err)
         return {}
 
 
