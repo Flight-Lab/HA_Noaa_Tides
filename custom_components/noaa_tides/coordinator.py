@@ -14,7 +14,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from . import const
 
-from .utils import degrees_to_cardinal
+from .utils import degrees_to_cardinal, handle_ndbc_api_error, handle_noaa_api_error
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -137,58 +137,98 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     return await self._fetch_noaa_data()
                 return await self._fetch_ndbc_data()
         except asyncio.TimeoutError as err:
-            raise UpdateFailed(f"Timeout fetching data: {err}") from err
+            error_handler = (
+                handle_noaa_api_error
+                if self.hub_type == const.HUB_TYPE_NOAA
+                else handle_ndbc_api_error
+            )
+            api_error = await error_handler(err, self.station_id)
+            _LOGGER.error(
+                "%s %s: %s Technical details: %s",
+                "NOAA Station" if self.hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
+                self.station_id,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
+            raise UpdateFailed(api_error.message)
         except Exception as err:
-            raise UpdateFailed(f"Error fetching data: {err}") from err
+            error_handler = (
+                handle_noaa_api_error
+                if self.hub_type == const.HUB_TYPE_NOAA
+                else handle_ndbc_api_error
+            )
+            api_error = await error_handler(err, self.station_id)
+            _LOGGER.error(
+                "%s %s: %s Technical details: %s",
+                "NOAA Station" if self.hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
+                self.station_id,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
+            raise UpdateFailed(api_error.message)
 
     async def _fetch_noaa_data(self) -> dict[str, Any]:
         """Fetch data from NOAA API."""
-        data = {}
-        tasks = []
+        try:
+            data = {}
+            tasks = []
 
-        # Prepare tasks for selected sensors
-        has_wind = (
-            "wind_speed" in self.selected_sensors
-            or "wind_direction" in self.selected_sensors
-        )
-        has_currents = (
-            "currents_speed" in self.selected_sensors
-            or "currents_direction" in self.selected_sensors
-        )
+            # Prepare tasks for selected sensors
+            has_wind = (
+                "wind_speed" in self.selected_sensors
+                or "wind_direction" in self.selected_sensors
+            )
+            has_currents = (
+                "currents_speed" in self.selected_sensors
+                or "currents_direction" in self.selected_sensors
+            )
 
-        for sensor in self.selected_sensors:
-            if sensor == "tide_predictions":
-                tasks.append(self._fetch_tide_predictions())
-            elif sensor == "currents_predictions":
-                tasks.append(self._fetch_noaa_currents_predictions())
-            elif sensor in "currents_speed, currents_direction":
-                if has_currents:
-                    tasks.append(self._fetch_noaa_currents_data())
-                    has_currents = False  # Prevent duplicate tasks
-            elif sensor == "water_level":
-                tasks.append(self._fetch_noaa_sensor_data(sensor))
-            elif sensor in ["wind_speed", "wind_direction"]:
-                # Only add wind task once if either wind sensor is selected
-                if has_wind:
-                    tasks.append(self._fetch_noaa_wind_data())
-                    has_wind = False  # Prevent duplicate tasks
-            else:
-                tasks.append(self._fetch_noaa_sensor_reading(sensor))
+            for sensor in self.selected_sensors:
+                if sensor == "tide_predictions":
+                    tasks.append(self._fetch_tide_predictions())
+                elif sensor == "currents_predictions":
+                    tasks.append(self._fetch_noaa_currents_predictions())
+                elif sensor in "currents_speed, currents_direction":
+                    if has_currents:
+                        tasks.append(self._fetch_noaa_currents_data())
+                        has_currents = False  # Prevent duplicate tasks
+                elif sensor == "water_level":
+                    tasks.append(self._fetch_noaa_sensor_data(sensor))
+                elif sensor in ["wind_speed", "wind_direction"]:
+                    # Only add wind task once if either wind sensor is selected
+                    if has_wind:
+                        tasks.append(self._fetch_noaa_wind_data())
+                        has_wind = False  # Prevent duplicate tasks
+                else:
+                    tasks.append(self._fetch_noaa_sensor_reading(sensor))
 
-        # Execute all tasks concurrently
-        async with asyncio.TaskGroup() as tg:
-            results = [tg.create_task(task) for task in tasks]
+            # Execute all tasks concurrently
+            async with asyncio.TaskGroup() as tg:
+                results = [tg.create_task(task) for task in tasks]
 
-        # Combine results
-        for result in results:
-            try:
-                sensor_data = result.result()
-                if sensor_data:
-                    data.update(sensor_data)
-            except Exception as err:
-                _LOGGER.error("Error processing sensor data: %s", err)
+            # Combine results
+            for result in results:
+                try:
+                    sensor_data = result.result()
+                    if sensor_data:
+                        data.update(sensor_data)
+                except Exception as err:
+                    _LOGGER.error(
+                        "NOAA Station %s: Error processing sensor data: %s",
+                        self.station_id,
+                        err,
+                    )
 
-        return data
+            return data
+        except Exception as err:
+            api_error = await handle_noaa_api_error(err, self.station_id)
+            _LOGGER.error(
+                "NOAA Station %s: Error fetching data: %s. Technical details: %s",
+                self.station_id,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
+            raise UpdateFailed(api_error.message)
 
     async def _fetch_tide_predictions(self) -> dict[str, Any]:
         """Fetch tide predictions and calculate tide state."""
@@ -207,9 +247,9 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         try:
             async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
                 if response.status != 200:
-                    raise UpdateFailed(
-                        f"Error fetching tide predictions: {response.status}"
-                    )
+                    error_msg = f"NOAA Station{self.station_id}: Error fetching tide predictions"
+                    _LOGGER.error("%s: HTTP %s", error_msg, response.status)
+                    raise UpdateFailed(error_msg)
 
                 data = await response.json()
                 predictions = data.get("predictions", [])
@@ -310,8 +350,13 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 }
 
         except Exception as err:
-            _LOGGER.error("Error calculating tide predictions: %s", err)
-            return {}
+            api_error = await handle_noaa_api_error(err, self.station_id)
+            _LOGGER.error(
+                "NOAA Station %s: Error calculating tide predictions: %s. Technical details: %s",
+                self.station_id,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
 
     async def _fetch_noaa_sensor_data(self, sensor_type: str) -> dict[str, Any]:
         """Fetch data for a specific NOAA sensor.
@@ -337,7 +382,8 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         try:
             _LOGGER.debug(
-                "Fetching NOAA sensor data for %s with params: %s",
+                "NOAA Station %s: Fetching sensor data for %s with params: %s",
+                self.station_id,
                 sensor_type,
                 {
                     k: v for k, v in params.items() if k != "format"
@@ -347,7 +393,8 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
                 if response.status != 200:
                     _LOGGER.error(
-                        "Error fetching %s data. Status: %s",
+                        "NOAA Station %s: Error fetching %s data. Status: %s",
+                        self.station_id,
                         sensor_type,
                         response.status,
                     )
@@ -357,7 +404,10 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
                 if not data.get("data"):
                     _LOGGER.error(
-                        "No data returned for %s. Response: %s", sensor_type, data
+                        "NOAA Station %s: No data returned for %s. Response: %s",
+                        self.station_id,
+                        sensor_type,
+                        data,
                     )
                     return {}
 
@@ -366,7 +416,8 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 # Only log the latest data point for water level at debug level
                 if sensor_type == "water_level":
                     _LOGGER.debug(
-                        "Latest water level reading - Value: %s %s, Time: %s, Datum: MLLW",
+                        "NOAA Station %s: Latest water level reading - Value: %s %s, Time: %s, Datum: MLLW",
+                        self.station_id,
                         latest.get("v", "N/A"),
                         "meters" if self.unit_system == const.UNIT_METRIC else "feet",
                         latest.get("t", "N/A"),
@@ -386,7 +437,10 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 }
         except Exception as err:
             _LOGGER.error(
-                "Error fetching NOAA sensor data for %s: %s", sensor_type, err
+                "NOAA Station %s: Error fetching sensor data for %s: %s",
+                self.station_id,
+                sensor_type,
+                err,
             )
             return {}
 
@@ -414,7 +468,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
                 if response.status != 200:
                     raise UpdateFailed(
-                        f"Error fetching currents predictions: {response.status}"
+                        f"{self.station_id}: Error fetching currents predictions: {response.status}"
                     )
 
                 data = await response.json()
@@ -423,7 +477,10 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 predictions = data.get("current_predictions", {}).get("cp", [])
 
                 if not predictions:
-                    _LOGGER.debug("No currents predictions data available")
+                    _LOGGER.debug(
+                        "NOAA Station %s: No currents predictions data available",
+                        self.station_id,
+                    )
                     return {}
 
                 # Get the most recent prediction
@@ -431,8 +488,9 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
                 # Log only relevant fields from the latest prediction
                 _LOGGER.debug(
-                    "Latest currents prediction - Time: %s, Velocity: %s, Type: %s, "
+                    "NOAA Station %s: Latest currents prediction - Time: %s, Velocity: %s, Type: %s, "
                     "Flood Dir: %s, Ebb Dir: %s",
+                    self.station_id,
                     latest.get("Time", "N/A"),
                     latest.get("Velocity_Major", "N/A"),
                     latest.get("Type", "N/A"),
@@ -478,8 +536,9 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
                 # Log the processed and structured return data
                 _LOGGER.debug(
-                    "Processed currents prediction - State: %s, Direction: %.1f°, "
+                    "NOAA Station %s: Processed currents prediction - State: %s, Direction: %.1f°, "
                     "Speed: %.2f %s, Time: %s",
+                    self.station_id,
                     type_value,
                     direction,
                     abs(velocity),
@@ -490,7 +549,13 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 return return_data
 
         except Exception as err:
-            _LOGGER.error("Error fetching currents predictions: %s", err)
+            api_error = await handle_noaa_api_error(err, self.station_id)
+            _LOGGER.error(
+                "NOAA Station %s: Error fetching currents predictions: %s. Technical details: %s",
+                self.station_id,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
             return {}
 
     async def _fetch_noaa_currents_data(self) -> dict[str, Any]:
@@ -508,7 +573,9 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
                 if response.status != 200:
                     _LOGGER.error(
-                        "Error fetching currents data. Status: %s", response.status
+                        "NOAA Station %s: Error fetching currents data. Status: %s",
+                        self.station_id,
+                        response.status,
                     )
                     return {}
 
@@ -541,12 +608,18 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 }
 
         except Exception as err:
-            _LOGGER.error("Error fetching currents data: %s", err)
+            api_error = await handle_noaa_api_error(err, self.station_id)
+            _LOGGER.error(
+                "NOAA Station %s: Error fetching currents data: %s. Technical details: %s",
+                self.station_id,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
             return {}
 
     async def _fetch_noaa_wind_data(self) -> dict[str, Any]:
         """Fetch wind data from NOAA API."""
-        _LOGGER.debug("Fetching wind data")
+        _LOGGER.debug("NOAA Station %s: Fetching wind data", self.station_id)
 
         params = {
             "station": self.station_id,
@@ -561,7 +634,9 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
                 if response.status != 200:
                     _LOGGER.error(
-                        "Error fetching wind data. Status: %s", response.status
+                        "NOAA Station %s: Error fetching wind data. Status: %s",
+                        self.station_id,
+                        response.status,
                     )
                     return {}
 
@@ -599,36 +674,44 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 }
 
         except Exception as err:
-            _LOGGER.error("Error fetching wind data: %s", err)
+            api_error = await handle_noaa_api_error(err, self.station_id)
+            _LOGGER.error(
+                "NOAA Station %s: Error fetching wind data: %s. Technical details: %s",
+                self.station_id,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
             return {}
 
     async def _fetch_noaa_sensor_reading(self, sensor_type: str) -> dict[str, Any]:
         """Fetch the latest reading for a NOAA environmental sensor."""
         if sensor_type == "wind":
             return await self._fetch_noaa_wind_data()
-        params = {
-            "station": self.station_id,
-            "date": "latest",
-            "time_zone": self.timezone,
-            "units": "metric" if self.unit_system == const.UNIT_METRIC else "english",
-            "format": "json",
-        }
-
-        # Map sensor types to their API parameter names
-        product_map = {
-            "water_temperature": "water_temperature",
-            "air_temperature": "air_temperature",
-            "air_pressure": "air_pressure",
-            "humidity": "relative_humidity",
-            "conductivity": "conductivity",
-        }
-
-        if sensor_type not in product_map:
-            return {}
-
-        params["product"] = product_map[sensor_type]
-
         try:
+            params = {
+                "station": self.station_id,
+                "date": "latest",
+                "time_zone": self.timezone,
+                "units": "metric"
+                if self.unit_system == const.UNIT_METRIC
+                else "english",
+                "format": "json",
+            }
+
+            # Map sensor types to their API parameter names
+            product_map = {
+                "water_temperature": "water_temperature",
+                "air_temperature": "air_temperature",
+                "air_pressure": "air_pressure",
+                "humidity": "relative_humidity",
+                "conductivity": "conductivity",
+            }
+
+            if sensor_type not in product_map:
+                return {}
+
+            params["product"] = product_map[sensor_type]
+
             async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
                 if response.status != 200:
                     return {}
@@ -653,37 +736,75 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     }
                 }
 
+        except asyncio.TimeoutError as err:
+            api_error = await handle_noaa_api_error(err, self.station_id)
+            _LOGGER.error(
+                "NOAA Station %s: Timeout fetching sensor %s: %s. Technical details: %s",
+                self.station_id,
+                sensor_type,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
+            return {}
+        except ValueError as err:
+            # Handle value conversion errors
+            _LOGGER.error(
+                "NOAA Station %s: Invalid value received for sensor %s at station %s: %s",
+                self.station_id,
+                sensor_type,
+                err,
+            )
+            return {}
         except Exception as err:
-            _LOGGER.error("Error fetching NOAA sensor reading: %s", err)
+            api_error = await handle_noaa_api_error(err, self.station_id)
+            _LOGGER.error(
+                "NOAA Station %s: Error fetching sensor %s: %s. Technical details: %s",
+                self.station_id,
+                sensor_type,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
             return {}
 
     async def _fetch_ndbc_data(self) -> dict[str, Any]:
         """Fetch data from NDBC APIs."""
-        data = {}
-        tasks = []
+        try:
+            data = {}
+            tasks = []
 
-        # Create tasks based on selected data sections
-        if const.DATA_METEOROLOGICAL in self.data_sections:
-            tasks.append(self._fetch_ndbc_meteorological())
-        if const.DATA_SPECTRAL_WAVE in self.data_sections:
-            tasks.append(self._fetch_ndbc_spectral_wave())
-        if const.DATA_OCEAN_CURRENT in self.data_sections:
-            tasks.append(self._fetch_ndbc_ocean_current())
+            # Create tasks based on selected data sections
+            if const.DATA_METEOROLOGICAL in self.data_sections:
+                tasks.append(self._fetch_ndbc_meteorological())
+            if const.DATA_SPECTRAL_WAVE in self.data_sections:
+                tasks.append(self._fetch_ndbc_spectral_wave())
+            if const.DATA_OCEAN_CURRENT in self.data_sections:
+                tasks.append(self._fetch_ndbc_ocean_current())
 
-        # Execute all tasks concurrently
-        async with asyncio.TaskGroup() as tg:
-            results = [tg.create_task(task) for task in tasks]
+            # Execute all tasks concurrently
+            async with asyncio.TaskGroup() as tg:
+                results = [tg.create_task(task) for task in tasks]
 
-        # Combine results
-        for result in results:
-            try:
-                section_data = result.result()
-                if section_data:
-                    data.update(section_data)
-            except Exception as err:
-                _LOGGER.error("Error processing NDBC data: %s", err)
+            # Combine results
+            for result in results:
+                try:
+                    section_data = result.result()
+                    if section_data:
+                        data.update(section_data)
+                except Exception as err:
+                    _LOGGER.error(
+                        "NDBC Buoy %s: Error processing data: %s", self.station_id, err
+                    )
 
-        return data
+            return data
+        except Exception as err:
+            api_error = await handle_ndbc_api_error(err, self.station_id)
+            _LOGGER.error(
+                "NDBC Buoy %s: Error fetching data: %s. Technical details: %s",
+                self.station_id,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
+            raise UpdateFailed(api_error.message)
 
     async def _fetch_ndbc_meteorological(self) -> dict[str, Any]:
         """Fetch meteorological data from NDBC."""
@@ -761,7 +882,8 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                                 }
                         except (ValueError, IndexError):
                             _LOGGER.debug(
-                                "Invalid data for sensor %s: %s",
+                                "Buoy %s: Invalid data for sensor %s: %s",
+                                self.station_id,
                                 sensor_id,
                                 data[i] if i < len(data) else "missing",
                             )
@@ -770,7 +892,13 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 return result
 
         except Exception as err:
-            _LOGGER.error("Error fetching NDBC meteorological data: %s", err)
+            api_error = await handle_ndbc_api_error(err, self.station_id)
+            _LOGGER.error(
+                "NDBC Buoy %s: Error fetching NDBC meteorological data: %s. Technical details: %s",
+                self.station_id,
+                api_error.message,
+                api_error.technical_detail or "None",
+            )
             return {}
 
     async def _fetch_ndbc_spectral_wave(self) -> dict[str, Any]:
@@ -780,7 +908,9 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             async with self.session.get(url) as response:
                 if response.status != 200:
                     _LOGGER.error(
-                        "Error fetching spectral wave data. Status: %s", response.status
+                        "NDBC Buoy %s: Error fetching spectral wave data. Status: %s",
+                        self.station_id,
+                        response.status,
                     )
                     return {}
 
@@ -789,7 +919,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
                 if len(lines) < 3:  # Need header, units, and at least one data line
                     _LOGGER.warning(
-                        "Insufficient data in spectral wave response for buoy %s",
+                        "NDBC Buoy %s: Insufficient data in spectral wave response",
                         self.station_id,
                     )
                     return {}
@@ -842,22 +972,27 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                             }
                     except (ValueError, IndexError):
                         _LOGGER.debug(
-                            "Invalid data for sensor %s: %s",
+                            "NDBC Buoy %s: Invalid data for sensor %s: %s",
+                            self.station_id,
                             sensor_id,
                             data[i] if i < len(data) else "missing",
                         )
                         continue
 
                 _LOGGER.debug(
-                    "Spectral wave sensors processed: %s", list(result.keys())
+                    "NDBC Buoy %s: Spectral wave sensors processed: %s",
+                    self.station_id,
+                    list(result.keys()),
                 )
                 return result
 
         except Exception as err:
+            api_error = await handle_ndbc_api_error(err, self.station_id)
             _LOGGER.error(
-                "Error processing spectral wave data for buoy %s: %s",
+                "NDBC Buoy %s: Error processing spectral wave data: %s. Technical details: %s",
                 self.station_id,
-                err,
+                api_error.message,
+                api_error.technical_detail or "None",
             )
             return {}
 
@@ -876,14 +1011,14 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             async with session.get(url) as response:
                 if response.status == 404:
                     _LOGGER.debug(
-                        "Ocean current data not available for buoy %s - this is normal as not all buoys have current sensors",
+                        "NDBC Buoy %s: Ocean current data not available - this is normal as not all buoys have current sensors",
                         self.station_id,
                     )
                     return {}
 
                 if response.status != 200:
                     _LOGGER.error(
-                        "Error fetching ocean current data for buoy %s. Status: %s",
+                        "NDBC Buoy %s: Error fetching ocean current data. Status: %s",
                         self.station_id,
                         response.status,
                     )
@@ -894,7 +1029,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
                 if len(lines) < 2:  # Need header and at least one data line
                     _LOGGER.debug(
-                        "Insufficient ocean current data for buoy %s",
+                        "NDBC Buoy %s: Insufficient ocean current data in response",
                         self.station_id,
                     )
                     return {}
@@ -950,7 +1085,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                         }
 
                 _LOGGER.debug(
-                    "Ocean current sensors processed for buoy %s: %s",
+                    "NDBC Buoy %s: Ocean current sensors processed: %s",
                     self.station_id,
                     list(result.keys()),
                 )
@@ -958,7 +1093,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         except Exception as err:
             _LOGGER.error(
-                "Error processing ocean current data for buoy %s: %s",
+                "NDBC Buoy %s: Error processing ocean current data: %s",
                 self.station_id,
                 err,
             )
