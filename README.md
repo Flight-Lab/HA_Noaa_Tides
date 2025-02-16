@@ -97,9 +97,9 @@ The NDBC and it's partners operate nearly 1000 active buoys and coastal stations
 ## Data Interpretation
 
 ### Tide Predictions
-- **Tide State**: Indicates if tide is rising or falling
-- **Tide Factor**: Sinusoidal representation of tide level (0-100%)
-- **Tide Percentage**: Linear representation of tide progress (0-100%)
+- **Tide State**: Indicates if tide is rising or falling and the time
+- **Tide Factor**: Sinusoidal representation of tide level (0-100%) that follows the natural curve of tidal change, with slower changes near high/low tides and faster changes at mid-tide levels.
+- **Tide Percentage**: Linear representation of tide progress (0-100%) that moves at a constant rate between tides, making it perfect for tide clocks and calculating exact timing of tidal events.
 
 ### Current Predictions (expiremental)
 - **Current State**: Shows ebb, flood, or slack water
