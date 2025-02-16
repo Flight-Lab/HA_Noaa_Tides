@@ -405,7 +405,7 @@ async def discover_ndbc_sensors(
                             units = lines[1].strip().split()  # Skip units line
 
                             # Get actual data lines, skipping headers and units
-                            data_lines = [line.strip().split() for line in lines[2:7]]
+                            data_lines = [line.strip().split() for line in lines[2:12]]
 
                             for i, header in enumerate(headers):
                                 if header in meteo_mapping:
