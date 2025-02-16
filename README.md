@@ -5,12 +5,12 @@
 -->
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-A custom component for Home Assistant that provides real-time tidal, current, and environmental data from NOAA's Center for Operational Oceanographic Products and Services (CO-OPS) API and the National Data Buoy Center (NDBC) API. This component enhances and extends the functionality of the [legacy NOAA Tides core component](https://www.home-assistant.io/integrations/noaa_tides/), offering improved UI configurability, automatic sensor detection, and enhanced data handling.
+A custom component for Home Assistant that provides real-time tidal, current, and environmental data from NOAA's Center for Operational Oceanographic Products and Services (CO-OPS) API and the National Data Buoy Center (NDBC) API. This component enhances and extends the functionality of the [legacy NOAA Tides core component](https://www.home-assistant.io/integrations/noaa_tides/), offering UI configurability, automatic sensor detection, and enhanced data handling.
 
 ## Features
 
 - **Dual Data Sources**: 
-  - NOAA CO-OPS stations for coastal tidal and environmental data
+  - NOAA CO-OPS stations for coastal and environmental data
   - NDBC buoys for offshore marine and weather observations
 - **Automatic Sensor Discovery**: Available sensors are automatically detected based on your station/buoy selection
 - **Real-time Data**: Regular updates from NOAA/NDBC APIs
@@ -82,7 +82,7 @@ A custom component for Home Assistant that provides real-time tidal, current, an
 ## Finding Your Station/Buoy ID
 
 ### NOAA Stations
-Visit the [NOAA Tides and Currents Map](https://tidesandcurrents.noaa.gov/map/) to find your station. NOAA operates nearly 500 stations with real-time data in the U.S., Caribbean, and Pacific territories. Alongside these physical stations, NOAA provides thousands of virtual stations to offering localized tide and current predictions, providing comprehensive coverage of coastal areas. Different stations support various data types:
+Visit the [NOAA Tides and Currents Map](https://tidesandcurrents.noaa.gov/map/) to find your station. NOAA operates nearly 500 stations with real-time data in the U.S., Caribbean, and Pacific territories. Alongside these physical stations, NOAA provides thousands of virtual stations that offer localized tide and current predictions, providing comprehensive coverage of coastal areas. Different stations support various data types:
 - [Tide Predictions](https://tidesandcurrents.noaa.gov/map/index.html?type=tidepredictions)
 - [Current Predictions](https://tidesandcurrents.noaa.gov/map/index.html?type=currentpredictions) (experimental)
 - [Meteorological Observations](https://tidesandcurrents.noaa.gov/map/index.html?type=meteorological)
@@ -91,7 +91,7 @@ Visit the [NOAA Tides and Currents Map](https://tidesandcurrents.noaa.gov/map/) 
 
 ### NDBC Buoys
 Use the [NDBC Station Map and Buoy Finder](https://www.ndbc.noaa.gov/obs.shtml?type=oceans&status=r&pgm=IOOS%20Partners|International%20Partners|Marine%20METAR|NDBC%20Meteorological%2FOcean|NERRS|NOS%2FCO-OPS&op=&ls=n) to locate your buoy.
-NDBC and it's partners operate nearly 1000 active buoys and coastal stations worldwide, with particularly extensive coverage in U.S. coastal waters, the Great Lakes, and Alaska.
+The NDBC and it's partners operate nearly 1000 active buoys and coastal stations worldwide, with particularly extensive coverage in U.S. coastal waters, the Great Lakes, and Alaska.
 <!-- narrow map parameters with further testing -->
 
 ## Data Interpretation
@@ -112,7 +112,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the Apache 2.0 License - see the LICENSE file for details.
 
 ## Support
 
