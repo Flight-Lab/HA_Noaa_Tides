@@ -72,7 +72,7 @@ A custom component for Home Assistant that provides real-time tidal, current, an
    - NDBC Buoy: For offshore marine observations
 4. Enter your station/buoy ID
 5. Configure additional options:
-   - Name: Custom name for the integration
+   - Name: Custom name for the station
    - Time Zone: Select preferred time zone display
    - Unit System: Choose metric or imperial units
    - Update Interval: Set data refresh frequency
