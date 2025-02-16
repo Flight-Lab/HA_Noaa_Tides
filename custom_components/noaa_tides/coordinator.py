@@ -428,9 +428,6 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                         "state": float(latest.get("v", 0)),
                         "attributes": {
                             "time": latest.get("t"),
-                            "units": "meters"
-                            if self.unit_system == const.UNIT_METRIC
-                            else "feet",
                             "datum": "MLLW",  # Add datum to attributes
                         },
                     }
