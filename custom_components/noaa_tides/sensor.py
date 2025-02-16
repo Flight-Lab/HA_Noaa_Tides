@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Final, TypedDict
+from typing import Any, Final, Literal, NotRequired, TypedDict
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -29,29 +29,91 @@ from . import const
 from .coordinator import NoaaTidesDataUpdateCoordinator, SensorData
 
 
-class WindSensorAttributes(TypedDict):
-    """Wind sensor attributes type."""
+# Sensor Attributes
+class BaseSensorAttributes(TypedDict):
+    """Base attributes shared by all sensors."""
+
+    time: NotRequired[str]
+    units: NotRequired[str]
+    flags: NotRequired[str]
+
+
+class WindAttributes(BaseSensorAttributes):
+    """Wind sensor attributes."""
 
     direction: float | None
     direction_cardinal: str | None
     gust: float | None
-    time: str
-    flags: str | None
 
 
-class TideSensorAttributes(TypedDict):
-    """Tide sensor attributes type."""
+class WaterLevelAttributes(BaseSensorAttributes):
+    """Water level sensor attributes."""
 
-    time: str
-    units: str
     datum: str
 
 
-class MeteoSensorAttributes(TypedDict):
-    """Meteorological sensor attributes type."""
+class TideStateAttributes(BaseSensorAttributes):
+    """Tide state sensor attributes."""
+
+    tide_state: Literal["rising", "falling"]
+    next_tide_type: Literal["High", "Low"]
+    next_tide_time: str
+    next_tide_level: float
+    following_tide_type: Literal["High", "Low"]
+    following_tide_time: str
+    following_tide_level: float
+    last_tide_type: Literal["High", "Low"]
+    last_tide_time: str
+    last_tide_level: float
+    tide_factor: float
+    tide_percentage: float
+
+
+class CurrentsAttributes(BaseSensorAttributes):
+    """Currents sensor attributes."""
+
+    direction: float | None
+    speed: float | None
+
+
+class MeteoAttributes(BaseSensorAttributes):
+    """Meteorological sensor attributes."""
 
     raw_value: str
     parameter: str
+
+
+# NDBC Sensor Attributes
+class NdbcMeteoAttributes(BaseSensorAttributes):
+    """NDBC meteorological sensor attributes."""
+
+    raw_value: NotRequired[str]
+    unit: NotRequired[str]
+
+
+class NdbcWaveAttributes(BaseSensorAttributes):
+    """NDBC wave sensor attributes."""
+
+    steepness: NotRequired[str]
+    raw_value: str
+    unit: str
+
+
+class NdbcCurrentAttributes(BaseSensorAttributes):
+    """NDBC current sensor attributes."""
+
+    depth: float
+    raw_value: str
+    unit: str
+
+
+# Sensor data container
+@dataclass
+class SensorData:
+    """Container for sensor data with typed attributes."""
+
+    state: float | str | None
+    attributes: BaseSensorAttributes
 
 
 @dataclass(frozen=True)
@@ -60,6 +122,7 @@ class NoaaTidesSensorEntityDescription(SensorEntityDescription):
 
     unit_metric: str | None = None
     unit_imperial: str | None = None
+    is_ndbc: bool = False
 
 
 # Sensor descriptions for NOAA Station
@@ -72,11 +135,13 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         unit_metric=UnitOfLength.METERS,
         unit_imperial=UnitOfLength.FEET,
+        is_ndbc=False,
     ),
     "tide_predictions": NoaaTidesSensorEntityDescription(
         key="tide_predictions",
         name="Tide State",
         icon="mdi:waves",
+        is_ndbc=False,
     ),
     "currents_speed": NoaaTidesSensorEntityDescription(
         key="currents_speed",
@@ -85,6 +150,7 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         unit_metric=UnitOfSpeed.METERS_PER_SECOND,
         unit_imperial=UnitOfSpeed.KNOTS,
+        is_ndbc=False,
     ),
     "currents_direction": NoaaTidesSensorEntityDescription(
         key="currents_direction",
@@ -92,11 +158,13 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         native_unit_of_measurement=DEGREE,
         icon="mdi:compass",
         state_class=SensorStateClass.MEASUREMENT,
+        is_ndbc=False,
     ),
     "currents_predictions": NoaaTidesSensorEntityDescription(
         key="currents_predictions",
         name="Predicted Currents State",
         icon="mdi:wave",
+        is_ndbc=False,
     ),
     "air_temperature": NoaaTidesSensorEntityDescription(
         key="air_temperature",
@@ -105,6 +173,7 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         unit_metric=UnitOfTemperature.CELSIUS,
         unit_imperial=UnitOfTemperature.FAHRENHEIT,
+        is_ndbc=False,
     ),
     "water_temperature": NoaaTidesSensorEntityDescription(
         key="water_temperature",
@@ -113,6 +182,7 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         unit_metric=UnitOfTemperature.CELSIUS,
         unit_imperial=UnitOfTemperature.FAHRENHEIT,
+        is_ndbc=False,
     ),
     "wind_speed": NoaaTidesSensorEntityDescription(
         key="wind_speed",
@@ -121,6 +191,7 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         unit_metric=UnitOfSpeed.KILOMETERS_PER_HOUR,
         unit_imperial=UnitOfSpeed.MILES_PER_HOUR,
+        is_ndbc=False,
     ),
     "wind_direction": NoaaTidesSensorEntityDescription(
         key="wind_direction",
@@ -128,6 +199,7 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         native_unit_of_measurement=DEGREE,
         icon="mdi:compass",
         state_class=SensorStateClass.MEASUREMENT,
+        is_ndbc=False,
     ),
     "air_pressure": NoaaTidesSensorEntityDescription(
         key="air_pressure",
@@ -136,6 +208,7 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         unit_metric=UnitOfPressure.HPA,
         unit_imperial=UnitOfPressure.INHG,
+        is_ndbc=False,
     ),
     "humidity": NoaaTidesSensorEntityDescription(
         key="humidity",
@@ -143,6 +216,7 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         device_class=SensorDeviceClass.HUMIDITY,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=PERCENTAGE,
+        is_ndbc=False,
     ),
     "conductivity": NoaaTidesSensorEntityDescription(
         key="conductivity",
@@ -150,6 +224,7 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         icon="mdi:flash",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="mS/cm",
+        is_ndbc=False,
     ),
 }
 
@@ -163,6 +238,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=DEGREE,
         icon="mdi:compass",
+        is_ndbc=True,
     ),
     "meteo_wspd": NoaaTidesSensorEntityDescription(
         key="meteo_wspd",
@@ -171,6 +247,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         unit_metric=UnitOfSpeed.METERS_PER_SECOND,
         unit_imperial=UnitOfSpeed.MILES_PER_HOUR,
+        is_ndbc=True,
     ),
     "meteo_gst": NoaaTidesSensorEntityDescription(
         key="meteo_gst",
@@ -180,6 +257,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         unit_metric=UnitOfSpeed.METERS_PER_SECOND,
         unit_imperial=UnitOfSpeed.MILES_PER_HOUR,
         icon="mdi:weather-windy-variant",
+        is_ndbc=True,
     ),
     "meteo_wvht": NoaaTidesSensorEntityDescription(
         key="meteo_wvht",
@@ -189,6 +267,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         unit_metric=UnitOfLength.METERS,
         unit_imperial=UnitOfLength.FEET,
         icon="mdi:waves",
+        is_ndbc=True,
     ),
     "meteo_dpd": NoaaTidesSensorEntityDescription(
         key="meteo_dpd",
@@ -196,6 +275,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="s",  # Periods don't need conversion
         icon="mdi:wave",
+        is_ndbc=True,
     ),
     "meteo_apd": NoaaTidesSensorEntityDescription(
         key="meteo_apd",
@@ -203,6 +283,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="s",  # Periods don't need conversion
         icon="mdi:wave",
+        is_ndbc=True,
     ),
     "meteo_mwd": NoaaTidesSensorEntityDescription(
         key="meteo_mwd",
@@ -210,6 +291,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=DEGREE,  # Directions don't need conversion
         icon="mdi:compass",
+        is_ndbc=True,
     ),
     "meteo_wtmp": NoaaTidesSensorEntityDescription(
         key="meteo_wtmp",
@@ -218,6 +300,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         unit_metric=UnitOfTemperature.CELSIUS,
         unit_imperial=UnitOfTemperature.FAHRENHEIT,
+        is_ndbc=True,
     ),
     # Spectral Wave Sensors
     "spec_wave_wvht": NoaaTidesSensorEntityDescription(
@@ -228,6 +311,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         unit_metric=UnitOfLength.METERS,
         unit_imperial=UnitOfLength.FEET,
         icon="mdi:waves",
+        is_ndbc=True,
     ),
     "spec_wave_swh": NoaaTidesSensorEntityDescription(
         key="spec_wave_swh",
@@ -237,6 +321,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         unit_metric=UnitOfLength.METERS,
         unit_imperial=UnitOfLength.FEET,
         icon="mdi:waves",
+        is_ndbc=True,
     ),
     "spec_wave_swp": NoaaTidesSensorEntityDescription(
         key="spec_wave_swp",
@@ -244,6 +329,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="s",  # Periods don't need conversion
         icon="mdi:timer",
+        is_ndbc=True,
     ),
     "spec_wave_wwh": NoaaTidesSensorEntityDescription(
         key="spec_wave_wwh",
@@ -253,6 +339,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         unit_metric=UnitOfLength.METERS,
         unit_imperial=UnitOfLength.FEET,
         icon="mdi:waves",
+        is_ndbc=True,
     ),
     "spec_wave_wwp": NoaaTidesSensorEntityDescription(
         key="spec_wave_wwp",
@@ -260,6 +347,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="s",  # Periods don't need conversion
         icon="mdi:timer",
+        is_ndbc=True,
     ),
     "spec_wave_swd": NoaaTidesSensorEntityDescription(
         key="spec_wave_swd",
@@ -267,6 +355,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=DEGREE,  # Directions don't need conversion
         icon="mdi:compass",
+        is_ndbc=True,
     ),
     "spec_wave_wwd": NoaaTidesSensorEntityDescription(
         key="spec_wave_wwd",
@@ -274,12 +363,14 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=DEGREE,  # Directions don't need conversion
         icon="mdi:compass",
+        is_ndbc=True,
     ),
     "spec_wave_steepness": NoaaTidesSensorEntityDescription(
         key="spec_wave_steepness",
         name="Wave Steepness",
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:sine-wave",
+        is_ndbc=True,
     ),
     "spec_wave_apd": NoaaTidesSensorEntityDescription(
         key="spec_wave_apd",
@@ -287,6 +378,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="s",  # Periods don't need conversion
         icon="mdi:timer",
+        is_ndbc=True,
     ),
     "spec_wave_mwd": NoaaTidesSensorEntityDescription(
         key="spec_wave_mwd",
@@ -294,6 +386,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=DEGREE,  # Directions don't need conversion
         icon="mdi:compass",
+        is_ndbc=True,
     ),
     # Ocean Current Sensors
     "current_depth": NoaaTidesSensorEntityDescription(
@@ -302,6 +395,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         native_unit_of_measurement=UnitOfLength.METERS,
         device_class=SensorDeviceClass.DISTANCE,
         state_class=SensorStateClass.MEASUREMENT,
+        is_ndbc=True,
     ),
     "current_drct": NoaaTidesSensorEntityDescription(
         key="current_drct",
@@ -309,6 +403,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         native_unit_of_measurement=DEGREE,
         icon="mdi:compass",
         state_class=SensorStateClass.MEASUREMENT,
+        is_ndbc=True,
     ),
     "current_spdd": NoaaTidesSensorEntityDescription(
         key="current_spdd",
@@ -316,6 +411,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         native_unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
         device_class=SensorDeviceClass.SPEED,
         state_class=SensorStateClass.MEASUREMENT,
+        is_ndbc=True,
     ),
 }
 
@@ -346,6 +442,7 @@ async def async_setup_entry(
             coordinator=coordinator,
             description=sensor_types[sensor_id],
             entry_id=entry.entry_id,
+            entry=entry,
             station_name=station_name,
         )
         for sensor_id in coordinator.selected_sensors
@@ -365,7 +462,14 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
     _attr_device_info: DeviceInfo
     _attr_native_unit_of_measurement: str | None
     _attr_native_value: float | str | None = None
-    _attr_extra_state_attributes: dict[str, Any] = {}
+    _attr_extra_state_attributes: (
+        BaseSensorAttributes
+        | WindAttributes
+        | WaterLevelAttributes
+        | TideStateAttributes
+        | CurrentsAttributes
+        | MeteoAttributes
+    ) = {}
 
     def __init__(
         self,
@@ -373,6 +477,7 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
         description: NoaaTidesSensorEntityDescription,
         entry_id: str,
         station_name: str,
+        entry: ConfigEntry,
     ) -> None:
         """Initialize the sensor.
 
@@ -381,29 +486,37 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
             description: The sensor entity description
             entry_id: The config entry ID
             station_name: The station name for entity ID
+            entry: The config entry
 
         """
         super().__init__(coordinator)
         self.entity_description = description
+        self.entry = entry
 
+        # Generate a unique ID
         # Generate a unique ID
         self._attr_unique_id = f"{entry_id}_{description.key}"
 
         # Set the entity ID to include station name
         self.entity_id = f"sensor.{station_name}_{description.key}"
 
+        # Get original name with proper case from config entry
+        original_name = entry.data.get("name", "")
+        clean_station_name = original_name.strip()  # Just remove any extra whitespace
         # Set up device info
         self._attr_device_info = DeviceInfo(
             identifiers={(const.DOMAIN, entry_id)},
-            name=(
+            name=clean_station_name,
+            manufacturer=(
+                "The National Oceanic & Atmospheric Administration"
+                if coordinator.hub_type == const.HUB_TYPE_NOAA
+                else "The National Data Buoy Center"
+            ),
+            model=(
                 f"NOAA Station {coordinator.station_id}"
                 if coordinator.hub_type == const.HUB_TYPE_NOAA
                 else f"NDBC Buoy {coordinator.station_id}"
             ),
-            manufacturer=(
-                "NOAA" if coordinator.hub_type == const.HUB_TYPE_NOAA else "NDBC"
-            ),
-            model=coordinator.hub_type,
         )
 
         # Set the native unit of measurement based on unit system and sensor type
@@ -423,10 +536,7 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
                     self._attr_native_unit_of_measurement = (
                         description.native_unit_of_measurement
                     )
-            elif (
-                description.key.endswith(("_wvht", "_swh", "_wwh"))
-                or "wave" in description.key
-            ):
+            elif description.key.endswith(("_wvht", "_swh", "_wwh")):
                 self._attr_native_unit_of_measurement = UnitOfLength.METERS
             else:
                 self._attr_native_unit_of_measurement = (
@@ -451,9 +561,15 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
             self.coordinator.data is not None
             and self.entity_description.key in self.coordinator.data
         ):
-            sensor_data: SensorData = self.coordinator.data[self.entity_description.key]
-            self._attr_native_value = sensor_data.get("state")
-            self._attr_extra_state_attributes = sensor_data.get("attributes", {})
+            sensor_data = self.coordinator.data[self.entity_description.key]
+
+            # Handle the data whether it's a dict or SensorData
+            if isinstance(sensor_data, dict):
+                self._attr_native_value = sensor_data.get("state")
+                self._attr_extra_state_attributes = sensor_data.get("attributes", {})
+            else:
+                self._attr_native_value = sensor_data.state
+                self._attr_extra_state_attributes = sensor_data.attributes
 
         self.async_write_ha_state()
 
@@ -462,8 +578,12 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
         """Return if entity is available."""
         if self.coordinator.data is None:
             return False
-        return (
-            self.entity_description.key in self.coordinator.data
-            and self.coordinator.data[self.entity_description.key].get("state")
-            is not None
-        )
+
+        sensor_data = self.coordinator.data.get(self.entity_description.key)
+        if sensor_data is None:
+            return False
+
+        # Handle both dict and SensorData types
+        if isinstance(sensor_data, dict):
+            return sensor_data.get("state") is not None
+        return sensor_data.state is not None
