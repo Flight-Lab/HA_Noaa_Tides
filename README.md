@@ -7,6 +7,9 @@
 
 A custom component for Home Assistant that provides real-time tidal, current, and environmental data from NOAA's Center for Operational Oceanographic Products and Services (CO-OPS) API and the National Data Buoy Center (NDBC) API. This component enhances and extends the functionality of the [legacy NOAA Tides core component](https://www.home-assistant.io/integrations/noaa_tides/), offering UI configurability, automatic sensor detection, and enhanced data handling.
 
+> [!WARNING]  
+> Sensor names and attributes subject to change before v 1.0.0 release. Feedback and suggestions are greatly appreciated.
+
 ## Features
 
 - **Dual Data Sources**: 
