@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 import logging
-from typing import Any, Final, Optional, TypedDict, cast
+from typing import Final, cast
 
 import aiohttp
 
@@ -13,48 +12,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import const
+from .types import ApiError, NoaaProductResponse, NoaaSensorResponse
 
 _LOGGER: Final = logging.getLogger(__name__)
-
-
-class NoaaProductResponse(TypedDict):
-    """NOAA product response type."""
-
-    products: list[dict[str, Any]]
-
-
-class NoaaSensorResponse(TypedDict):
-    """NOAA sensor response type."""
-
-    sensors: list[dict[str, Any]]
-
-
-class NdbcHeaderData(TypedDict):
-    """NDBC header data type."""
-
-    WDIR: str
-    WSPD: str
-    GST: str
-    WVHT: str
-    DPD: str
-    APD: str
-    MWD: str
-    PRES: str
-    ATMP: str
-    WTMP: str
-    DEWP: str
-    PTDY: str
-    TIDE: str
-
-
-@dataclass
-class ApiError:
-    """Class to represent API errors with user-friendly messages."""
-
-    code: str
-    message: str
-    technical_detail: Optional[str] = None
-    help_url: Optional[str] = None
 
 
 async def handle_noaa_api_error(error: Exception, station_id: str) -> ApiError:
