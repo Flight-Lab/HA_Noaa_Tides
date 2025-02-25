@@ -1,0 +1,109 @@
+{
+    "config": {
+      "step": {
+        "user": {
+          "title": "NOAA Tides Setup",
+          "description": "Choose between NOAA Station or NDBC Buoy data source",
+          "data": {
+            "hub_type": "Data Source Type"
+          }
+        },
+        "station_config": {
+          "title": "Station Configuration",
+          "description": "Configure your station or buoy settings",
+          "data": {
+            "station_id": "NOAA Station ID",
+            "buoy_id": "NDBC Buoy ID",
+            "name": "Name",
+            "timezone": "Timezone",
+            "unit_system": "Unit System",
+            "update_interval": "Update Interval (60-3600 seconds)"
+          }
+        },
+        "ndbc_data": {
+          "title": "NDBC Data Sections",
+          "description": "Select at least one data section to monitor",
+          "data": {
+            "data_sections": "Available Data Sections"
+          }
+        },
+        "sensor_select": {
+          "title": "Sensor Selection",
+          "description": "Select which sensors to enable for this station/buoy",
+          "data": {
+            "sensors": "Available Sensors"
+          }
+        }
+      },
+      "error": {
+        "invalid_station": "Invalid station ID provided",
+        "invalid_buoy": "Invalid buoy ID provided",
+        "no_data_sections": "At least one data section must be selected",
+        "no_sensors": "No available sensors found for this station/buoy",
+        "unknown": "An unexpected error occurred",
+        "invalid_timezone": "Invalid timezone selection",
+        "invalid_unit_system": "Invalid unit system selection",
+        "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]"
+      },
+      "abort": {
+        "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+        "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
+      }
+    },
+    "options": {
+      "step": {
+        "init": {
+          "title": "NOAA Tides Options",
+          "description": "Update integration settings",
+          "data": {
+            "update_interval": "Update Interval (60-3600 seconds)"
+          }
+        }
+      }
+    },
+    "entity": {
+      "sensor": {
+        "tide_state": {
+          "state": {
+            "rising": "Rising",
+            "falling": "Falling"
+          }
+        },
+        "currents_predictions": {
+          "state": {
+            "ebb": "Ebb",
+            "flood": "Flood",
+            "slack": "Slack"
+          }
+        }
+      }
+    },
+    "selector": {
+      "hub_type": {
+        "options": {
+          "noaa_station": "NOAA Station",
+          "ndbc_buoy": "NDBC Buoy"
+        }
+      },
+      "timezone": {
+        "options": {
+          "gmt": "GMT",
+          "lst": "Local Standard Time",
+          "lst_ldt": "Local Standard/Daylight Time"
+        }
+      },
+      "unit_system": {
+        "options": {
+          "metric": "Metric",
+          "imperial": "Imperial"
+        }
+      },
+      "data_sections": {
+        "options": {
+          "meteorological": "Meteorological Data",
+          "spectral_wave": "Spectral Wave Data",
+          "ocean_current": "Ocean Current Data"
+        }
+      }
+    }
+  }
