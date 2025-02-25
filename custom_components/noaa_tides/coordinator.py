@@ -13,79 +13,10 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from . import const
-
+from .types import CoordinatorData
 from .utils import degrees_to_cardinal, handle_ndbc_api_error, handle_noaa_api_error
 
 _LOGGER = logging.getLogger(__name__)
-
-
-# Type definitions for the data structures
-class TidePrediction(TypedDict):
-    """Type for tide prediction data."""
-
-    time: datetime
-    type: Literal["H", "L"]
-    level: float
-
-
-class SensorData(TypedDict):
-    """Type for sensor data."""
-
-    state: float | str
-    attributes: dict[str, Any]
-
-
-class TidePredictionAttributes(TypedDict):
-    """Type for tide prediction attributes."""
-
-    next_tide_type: Literal["High", "Low"]
-    next_tide_time: str
-    next_tide_level: float
-    following_tide_type: Literal["High", "Low"]
-    following_tide_time: str
-    following_tide_level: float
-    last_tide_type: Literal["High", "Low"]
-    last_tide_time: str
-    last_tide_level: float
-    tide_factor: float
-    tide_percentage: float
-
-
-class TidePredictionData(TypedDict):
-    """Type for complete tide prediction data."""
-
-    state: str
-    attributes: TidePredictionAttributes
-
-
-class CurrentsPredictionData(TypedDict):
-    """Type for complete currents prediction data."""
-
-    state: Literal["ebb", "slack", "flood"]
-    attributes: dict[str, Any]
-
-
-class NoaaApiResponse(TypedDict):
-    """Type for NOAA API response."""
-
-    data: list[dict[str, Any]]
-    predictions: NotRequired[list[dict[str, Any]]]
-
-
-class CoordinatorData(TypedDict):
-    """Type for coordinator data."""
-
-    tide_predictions: NotRequired[TidePredictionData]
-    water_level: NotRequired[SensorData]
-    currents: NotRequired[SensorData]
-    currents_predictions: NotRequired[CurrentsPredictionData]
-    wind_speed: NotRequired[SensorData]
-    wind_direction: NotRequired[SensorData]
-    air_temperature: NotRequired[SensorData]
-    water_temperature: NotRequired[SensorData]
-    air_pressure: NotRequired[SensorData]
-    humidity: NotRequired[SensorData]
-    conductivity: NotRequired[SensorData]
 
 
 class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
@@ -827,51 +758,48 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     if sensor_id in self.selected_sensors:
                         try:
                             if i < len(data) and data[i] != "MM" and data[i] != "999":
-                                # Round initial value to 2 decimal places
-                                value = round(float(data[i]), 2)
+                                # Store original value before conversion
+                                original_value = float(data[i])
+                                # Round original value to 2 decimal places
+                                value = round(original_value, 2)
+
+                                # Initialize attributes
+                                attributes: dict[str, Any] = {
+                                    "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                                }
 
                                 # Convert values if imperial units are requested
                                 if self.unit_system == const.UNIT_IMPERIAL:
                                     # Temperature conversions (ATMP, WTMP, DEWP) - Celsius to Fahrenheit
                                     if header in ["ATMP", "WTMP", "DEWP"]:
                                         value = round((value * 9 / 5) + 32, 2)
+                                        # Store original value and unit for reference
+                                        attributes["raw_value"] = str(original_value)
+                                        attributes["unit"] = "°C"
 
                                     # Wind speed and gust conversions (WSPD, GST) - m/s to mph
                                     elif header in ["WSPD", "GST"]:
                                         value = round(value * 2.23694, 2)
+                                        attributes["raw_value"] = str(original_value)
+                                        attributes["unit"] = "m/s"
 
                                     # Wave height conversion (WVHT) - meters to feet
                                     elif header == "WVHT":
                                         value = round(value * 3.28084, 2)
+                                        attributes["raw_value"] = str(original_value)
+                                        attributes["unit"] = "m"
 
                                     # Pressure conversion (PRES) - hPa to inHg
                                     elif header == "PRES":
                                         value = round(value * 0.02953, 2)
+                                        attributes["raw_value"] = str(original_value)
+                                        attributes["unit"] = "hPa"
 
-                                # Initialize empty attributes dictionary
-                                attributes = {}
-
-                                # Add attributes based on sensor type
+                                # Add direction cardinal for direction measurements
                                 if header in ["WDIR", "MWD"]:  # Direction sensors
                                     cardinal = degrees_to_cardinal(value)
                                     if cardinal:
                                         attributes["direction_cardinal"] = cardinal
-                                elif header in [
-                                    "WSPD",
-                                    "GST",
-                                    "WVHT",
-                                    "PRES",
-                                    "ATMP",
-                                    "WTMP",
-                                    "DEWP",
-                                ]:
-                                    # Store the original (unconverted) value and unit
-                                    attributes["raw_value"] = str(
-                                        round(float(data[i]), 2)
-                                    )
-                                    attributes["unit"] = (
-                                        units[i] if i < len(units) else None
-                                    )
 
                                 result[sensor_id] = {
                                     "state": value,
