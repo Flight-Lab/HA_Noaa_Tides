@@ -17,123 +17,113 @@ from .types import ApiError, NoaaProductResponse, NoaaSensorResponse
 _LOGGER: Final = logging.getLogger(__name__)
 
 
-async def handle_noaa_api_error(error: Exception, station_id: str) -> ApiError:
-    """Handle NOAA API errors and return user-friendly messages."""
+async def handle_api_error(
+    error: Exception, station_id: str, is_noaa: bool = True
+) -> ApiError:
+    """Handle API errors and return user-friendly messages.
+
+    Args:
+        error: The exception that occurred
+        station_id: The station or buoy ID
+        is_noaa: Whether this is a NOAA station (True) or NDBC buoy (False)
+
+    Returns:
+        ApiError: A structured error object with user-friendly messages
+    """
+    prefix = "Station" if is_noaa else "Buoy"
+    service_name = "NOAA" if is_noaa else "NDBC"
+    help_url = (
+        "https://tidesandcurrents.noaa.gov/stations.html"
+        if is_noaa
+        else "https://www.ndbc.noaa.gov/stations.shtml"
+    )
+
     if isinstance(error, asyncio.TimeoutError):
         return ApiError(
             code="timeout",
-            message=f"Station {station_id}: Connection timed out. Please check your internet connection.",
+            message=f"{prefix} {station_id}: Connection timed out. Please check your internet connection.",
             technical_detail=str(error),
-            help_url="https://tidesandcurrents.noaa.gov/stations.html",
+            help_url=help_url,
         )
 
     if isinstance(error, aiohttp.ClientResponseError):
         if error.status == 404:
             return ApiError(
-                code="station_not_found",
-                message=f"Station {station_id}: Not found. Please verify the station ID.",
-                help_url="https://tidesandcurrents.noaa.gov/stations.html",
+                code=f"{'station' if is_noaa else 'buoy'}_not_found",
+                message=f"{prefix} {station_id}: Not found. Please verify the {('station' if is_noaa else 'buoy')} ID.",
+                help_url=help_url,
             )
         if error.status in (500, 502, 503, 504):
             return ApiError(
                 code="server_error",
-                message=f"Station {station_id}: NOAA service is temporarily unavailable. Please try again later.",
+                message=f"{prefix} {station_id}: {service_name} service is temporarily unavailable. Please try again later.",
                 technical_detail=f"Status: {error.status}",
             )
         if error.status == 429:
             return ApiError(
                 code="rate_limit",
-                message=f"Station {station_id}: Too many requests to NOAA API. Please try again later.",
+                message=f"{prefix} {station_id}: Too many requests to {service_name} API. Please try again later.",
                 technical_detail=f"Status: {error.status}",
             )
         return ApiError(
             code=f"http_error_{error.status}",
-            message=f"Station {station_id}: Unexpected HTTP error occurred.",
+            message=f"{prefix} {station_id}: Unexpected HTTP error occurred.",
             technical_detail=f"Status: {error.status}",
         )
 
     if isinstance(error, aiohttp.ClientConnectionError):
         return ApiError(
             code="connection_error",
-            message=f"Station {station_id}: Could not connect to NOAA service. Please check your internet connection.",
+            message=f"{prefix} {station_id}: Could not connect to {service_name} service. Please check your internet connection.",
             technical_detail=str(error),
         )
 
     if isinstance(error, ValueError):
         return ApiError(
             code="invalid_data",
-            message=f"Station {station_id}: Received invalid data from NOAA service.",
+            message=f"{prefix} {station_id}: Received invalid data from {service_name} service.",
+            technical_detail=str(error),
+        )
+
+    # Handle NDBC-specific errors
+    if not is_noaa and isinstance(error, UnicodeDecodeError):
+        return ApiError(
+            code="decode_error",
+            message=f"Buoy {station_id}: Could not read NDBC data format.",
             technical_detail=str(error),
         )
 
     return ApiError(
         code="unknown",
-        message=f"Station {station_id}: An unexpected error occurred while connecting to NOAA.",
+        message=f"{prefix} {station_id}: An unexpected error occurred while connecting to {service_name}.",
         technical_detail=str(error),
     )
+
+
+async def handle_noaa_api_error(error: Exception, station_id: str) -> ApiError:
+    """Handle NOAA API errors and return user-friendly messages.
+
+    Args:
+        error: The exception that occurred
+        station_id: The station ID
+
+    Returns:
+        ApiError: A structured error object with user-friendly messages
+    """
+    return await handle_api_error(error, station_id, is_noaa=True)
 
 
 async def handle_ndbc_api_error(error: Exception, buoy_id: str) -> ApiError:
-    """Handle NDBC API errors and return user-friendly messages."""
-    if isinstance(error, asyncio.TimeoutError):
-        return ApiError(
-            code="timeout",
-            message=f"Buoy {buoy_id}: Connection timed out. Please check your internet connection.",
-            technical_detail=str(error),
-            help_url="https://www.ndbc.noaa.gov/stations.shtml",
-        )
+    """Handle NDBC API errors and return user-friendly messages.
 
-    if isinstance(error, aiohttp.ClientResponseError):
-        if error.status == 404:
-            return ApiError(
-                code="buoy_not_found",
-                message=f"Buoy {buoy_id}: Not found. Please verify the buoy ID.",
-                help_url="https://www.ndbc.noaa.gov/stations.shtml",
-            )
-        if error.status in (500, 502, 503, 504):
-            return ApiError(
-                code="server_error",
-                message=f"Buoy {buoy_id}: NDBC service is temporarily unavailable. Please try again later.",
-                technical_detail=f"Status: {error.status}",
-            )
-        if error.status == 429:
-            return ApiError(
-                code="rate_limit",
-                message=f"Buoy {buoy_id}: Too many requests to NDBC API. Please try again later.",
-                technical_detail=f"Status: {error.status}",
-            )
-        return ApiError(
-            code=f"http_error_{error.status}",
-            message=f"Buoy {buoy_id}: Unexpected HTTP error occurred.",
-            technical_detail=f"Status: {error.status}",
-        )
+    Args:
+        error: The exception that occurred
+        buoy_id: The buoy ID
 
-    if isinstance(error, aiohttp.ClientConnectionError):
-        return ApiError(
-            code="connection_error",
-            message=f"Buoy {buoy_id}: Could not connect to NDBC service. Please check your internet connection.",
-            technical_detail=str(error),
-        )
-
-    if isinstance(error, ValueError):
-        return ApiError(
-            code="invalid_data",
-            message=f"Buoy {buoy_id}: Received invalid data from NDBC service.",
-            technical_detail=str(error),
-        )
-
-    if isinstance(error, UnicodeDecodeError):
-        return ApiError(
-            code="decode_error",
-            message=f"Buoy {buoy_id}: Could not read NDBC data format.",
-            technical_detail=str(error),
-        )
-
-    return ApiError(
-        code="unknown",
-        message=f"Buoy {buoy_id}: An unexpected error occurred while connecting to NDBC.",
-        technical_detail=str(error),
-    )
+    Returns:
+        ApiError: A structured error object with user-friendly messages
+    """
+    return await handle_api_error(error, buoy_id, is_noaa=False)
 
 
 async def validate_noaa_station(hass: HomeAssistant, station_id: str) -> bool:
@@ -223,7 +213,7 @@ async def validate_ndbc_buoy(
         return valid_responses > 0
 
     except Exception as err:
-        _LOGGER.error("NDBC Buoy: Error validating: %s", buoy_id, err)
+        _LOGGER.error("NDBC Buoy %s: Error validating: %s", buoy_id, err)
         return False
 
 
@@ -508,7 +498,7 @@ async def discover_ndbc_sensors(
         return sensors
 
     except Exception as err:
-        _LOGGER.error("NDBC Buoy %s: Error discovering sensors: %s", err)
+        _LOGGER.error("NDBC Buoy %s: Error discovering sensors: %s", buoy_id, err)
         return {}
 
 
