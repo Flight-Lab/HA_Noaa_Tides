@@ -26,104 +26,16 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import const
-from .coordinator import NoaaTidesDataUpdateCoordinator, SensorData
-
-
-# Sensor Attributes
-class BaseSensorAttributes(TypedDict):
-    """Base attributes shared by all sensors."""
-
-    time: NotRequired[str]
-    units: NotRequired[str]
-    flags: NotRequired[str]
-
-
-class WindAttributes(BaseSensorAttributes):
-    """Wind sensor attributes."""
-
-    direction: float | None
-    direction_cardinal: str | None
-    gust: float | None
-
-
-class WaterLevelAttributes(BaseSensorAttributes):
-    """Water level sensor attributes."""
-
-    datum: str
-
-
-class TideStateAttributes(BaseSensorAttributes):
-    """Tide state sensor attributes."""
-
-    tide_state: Literal["rising", "falling"]
-    next_tide_type: Literal["High", "Low"]
-    next_tide_time: str
-    next_tide_level: float
-    following_tide_type: Literal["High", "Low"]
-    following_tide_time: str
-    following_tide_level: float
-    last_tide_type: Literal["High", "Low"]
-    last_tide_time: str
-    last_tide_level: float
-    tide_factor: float
-    tide_percentage: float
-
-
-class CurrentsAttributes(BaseSensorAttributes):
-    """Currents sensor attributes."""
-
-    direction: float | None
-    speed: float | None
-
-
-class MeteoAttributes(BaseSensorAttributes):
-    """Meteorological sensor attributes."""
-
-    raw_value: str
-    parameter: str
-
-
-# NDBC Sensor Attributes
-class NdbcMeteoAttributes(BaseSensorAttributes):
-    """NDBC meteorological sensor attributes."""
-
-    raw_value: NotRequired[str]
-    unit: NotRequired[str]
-
-
-class NdbcWaveAttributes(BaseSensorAttributes):
-    """NDBC wave sensor attributes."""
-
-    steepness: NotRequired[str]
-    raw_value: str
-    unit: str
-
-
-class NdbcCurrentAttributes(BaseSensorAttributes):
-    """NDBC current sensor attributes."""
-
-    depth: float
-    raw_value: str
-    unit: str
-
-
-# Sensor data container
-@dataclass
-class SensorData:
-    """Container for sensor data with typed attributes."""
-
-    state: float | str | None
-    attributes: BaseSensorAttributes
-
-
-@dataclass(frozen=True)
-class NoaaTidesSensorEntityDescription(SensorEntityDescription):
-    """Class describing NOAA Tides sensor entities."""
-
-    unit_metric: str | None = None
-    unit_imperial: str | None = None
-    is_ndbc: bool = False
-
+from .coordinator import NoaaTidesDataUpdateCoordinator
+from .types import (
+    BaseSensorAttributes,
+    CurrentsAttributes,
+    MeteoAttributes,
+    NoaaTidesSensorEntityDescription,
+    TidePredictionAttributes,
+    WaterLevelAttributes,
+    WindAttributes,
+)
 
 # Sensor descriptions for NOAA Station
 NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
@@ -466,7 +378,7 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
         BaseSensorAttributes
         | WindAttributes
         | WaterLevelAttributes
-        | TideStateAttributes
+        | TidePredictionAttributes
         | CurrentsAttributes
         | MeteoAttributes
     ) = {}

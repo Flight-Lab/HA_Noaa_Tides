@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Final, NotRequired, TypedDict
+from typing import Any, Final
 
 import voluptuous as vol
 
@@ -13,6 +13,7 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 
 from . import const
+from .types import ConfigFlowData
 from .utils import (
     discover_ndbc_sensors,
     discover_noaa_sensors,
@@ -21,20 +22,6 @@ from .utils import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-class ConfigFlowData(TypedDict):
-    """Config flow data type."""
-
-    name: str
-    sensors: list[str]
-    hub_type: str
-    station_id: NotRequired[str]  # NOAA stations
-    buoy_id: NotRequired[str]  # NDBC buoys
-    timezone: str
-    unit_system: str
-    update_interval: int
-    data_sections: NotRequired[list[str]]  # Only for NDBC
 
 
 class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
