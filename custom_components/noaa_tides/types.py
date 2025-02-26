@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, Optional, TypedDict
 
 from homeassistant.components.sensor import SensorEntityDescription
 
@@ -167,6 +167,24 @@ class NdbcCurrentAttributes(BaseSensorAttributes):
     unit: str
 
 
+class NdbcHeaderData(TypedDict):
+    """NDBC header data type."""
+
+    WDIR: str
+    WSPD: str
+    GST: str
+    WVHT: str
+    DPD: str
+    APD: str
+    MWD: str
+    PRES: str
+    ATMP: str
+    WTMP: str
+    DEWP: str
+    PTDY: str
+    TIDE: str
+
+
 # Config Flow Types
 class ConfigFlowData(TypedDict):
     """Config flow data type."""
@@ -206,3 +224,13 @@ class NoaaTidesSensorEntityDescription(SensorEntityDescription):
     unit_metric: str | None = None
     unit_imperial: str | None = None
     is_ndbc: bool = False
+
+
+@dataclass
+class ApiError:
+    """Class to represent API errors with user-friendly messages."""
+
+    code: str
+    message: str
+    technical_detail: Optional[str] = None
+    help_url: Optional[str] = None
