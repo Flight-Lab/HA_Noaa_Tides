@@ -12,7 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import const
-from .types import ApiError, NoaaProductResponse, NoaaSensorResponse
+from .types import ApiError, HubType, NoaaProductResponse, NoaaSensorResponse
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -126,6 +126,97 @@ async def handle_ndbc_api_error(error: Exception, buoy_id: str) -> ApiError:
     return await handle_api_error(error, buoy_id, is_noaa=False)
 
 
+async def validate_data_source(
+    hass: HomeAssistant,
+    source_id: str,
+    hub_type: HubType,
+    data_sections: list[str] | None = None,
+) -> bool:
+    """Validate a NOAA station or NDBC buoy ID.
+
+    Args:
+        hass: HomeAssistant instance
+        source_id: Station or buoy identifier to validate
+        hub_type: The type of hub (NOAA or NDBC)
+        data_sections: Selected data sections for NDBC buoys
+
+    Returns:
+        bool: True if source is valid, False otherwise
+    """
+    try:
+        session = async_get_clientsession(hass)
+
+        # NOAA Station validation
+        if hub_type == const.HUB_TYPE_NOAA:
+            url = const.NOAA_PRODUCTS_URL.format(station_id=source_id)
+            async with session.get(url) as response:
+                if response.status != 200:
+                    return False
+                data = cast(NoaaProductResponse, await response.json())
+                return bool(data.get("products"))
+
+        # NDBC Buoy validation
+        else:
+            # If no data sections specified, default to meteorological
+            selected_sections = data_sections or [const.DATA_METEOROLOGICAL]
+
+            tasks: list[asyncio.Task[aiohttp.ClientResponse]] = []
+
+            # Create validation tasks based on selected data sections
+            for section in selected_sections:
+                if section == const.DATA_METEOROLOGICAL:
+                    url = const.NDBC_METEO_URL.format(buoy_id=source_id)
+                elif section == const.DATA_SPECTRAL_WAVE:
+                    url = const.NDBC_SPEC_URL.format(buoy_id=source_id)
+                elif section == const.DATA_OCEAN_CURRENT:
+                    url = const.NDBC_CURRENT_URL.format(buoy_id=source_id)
+                else:
+                    continue
+
+                tasks.append(
+                    asyncio.create_task(
+                        session.get(url, timeout=aiohttp.ClientTimeout(total=10))
+                    )
+                )
+
+            if not tasks:
+                return False
+
+            # Wait for all tasks to complete
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Consider buoy valid if ANY selected data section is available
+            valid_responses = 0
+            for response in responses:
+                if isinstance(response, Exception):
+                    _LOGGER.debug(
+                        "NDBC Buoy %s: Error checking data: %s", source_id, response
+                    )
+                    continue
+
+                if response.status == 200:
+                    try:
+                        text = await response.text()
+                        if len(text.strip().split("\n")) > 1:
+                            valid_responses += 1
+                    except Exception as err:
+                        _LOGGER.debug(
+                            "NDBC Buoy %s: Error reading response: %s", source_id, err
+                        )
+                        continue
+
+            return valid_responses > 0
+
+    except Exception as err:
+        _LOGGER.error(
+            "%s %s: Error validating: %s",
+            "NOAA Station" if hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
+            source_id,
+            err,
+        )
+        return False
+
+
 async def validate_noaa_station(hass: HomeAssistant, station_id: str) -> bool:
     """Validate a NOAA station ID by checking the products endpoint.
 
@@ -135,86 +226,24 @@ async def validate_noaa_station(hass: HomeAssistant, station_id: str) -> bool:
 
     Returns:
         bool: True if station is valid, False otherwise
-
     """
-    try:
-        session = async_get_clientsession(hass)
-        url = const.NOAA_PRODUCTS_URL.format(station_id=station_id)
-
-        async with session.get(url) as response:
-            if response.status != 200:
-                return False
-            data = cast(NoaaProductResponse, await response.json())
-            return bool(data.get("products"))
-
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
-        _LOGGER.error("Station %s: Error validating: %s", station_id, err)
-        return False
+    return await validate_data_source(hass, station_id, const.HUB_TYPE_NOAA)
 
 
 async def validate_ndbc_buoy(
     hass: HomeAssistant, buoy_id: str, data_sections: list[str]
 ) -> bool:
-    """Validate an NDBC buoy ID by checking the specified data sections."""
-    try:
-        session = async_get_clientsession(hass)
+    """Validate an NDBC buoy ID by checking the specified data sections.
 
-        # If no data sections specified, default to meteorological
-        if not data_sections:
-            data_sections = [const.DATA_METEOROLOGICAL]
+    Args:
+        hass: HomeAssistant instance
+        buoy_id: NDBC buoy identifier to validate
+        data_sections: Data sections to check for validation
 
-        tasks: list[asyncio.Task[aiohttp.ClientResponse]] = []
-
-        # Create validation tasks based on selected data sections
-        for section in data_sections:
-            if section == const.DATA_METEOROLOGICAL:
-                url = const.NDBC_METEO_URL.format(buoy_id=buoy_id)
-            elif section == const.DATA_SPECTRAL_WAVE:
-                url = const.NDBC_SPEC_URL.format(buoy_id=buoy_id)
-            elif section == const.DATA_OCEAN_CURRENT:
-                url = const.NDBC_CURRENT_URL.format(buoy_id=buoy_id)
-            else:
-                continue
-
-            # Add timeout to request
-            tasks.append(
-                asyncio.create_task(
-                    session.get(url, timeout=aiohttp.ClientTimeout(total=10))
-                )
-            )
-
-        if not tasks:
-            return False
-
-        # Wait for all tasks to complete
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Consider buoy valid if ANY selected data section is available
-        valid_responses = 0
-        for response in responses:
-            if isinstance(response, Exception):
-                _LOGGER.debug(
-                    "NDBC Buoy %s: Error checking data: %s", buoy_id, response
-                )
-                continue
-
-            if response.status == 200:
-                try:
-                    text = await response.text()
-                    if len(text.strip().split("\n")) > 1:
-                        valid_responses += 1
-                except Exception as err:
-                    _LOGGER.debug(
-                        "NDBC Buoy %s: Error reading response: %s", buoy_id, err
-                    )
-                    continue
-
-        # Consider valid if at least one data section is available
-        return valid_responses > 0
-
-    except Exception as err:
-        _LOGGER.error("NDBC Buoy %s: Error validating: %s", buoy_id, err)
-        return False
+    Returns:
+        bool: True if buoy is valid, False otherwise
+    """
+    return await validate_data_source(hass, buoy_id, const.HUB_TYPE_NDBC, data_sections)
 
 
 async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[str, str]:
