@@ -8,11 +8,22 @@ from typing import Final, cast
 
 import aiohttp
 
+from homeassistant.const import (
+    UnitOfLength,
+    UnitOfPressure,
+    UnitOfSpeed,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import const
-from .types import HubType, NoaaProductResponse, NoaaSensorResponse
+from .types import (
+    HubType,
+    NoaaProductResponse,
+    NoaaSensorResponse,
+    NoaaTidesSensorEntityDescription,
+)
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -486,3 +497,90 @@ def degrees_to_cardinal(degrees: float | None) -> str | None:
     # Convert degrees to 0-15 range for array index
     index = int((degrees + 11.25) / 22.5) % 16
     return directions[index]
+
+
+def get_unit_for_sensor(
+    sensor_description: NoaaTidesSensorEntityDescription,
+    unit_system: str,
+    hub_type: str,
+    sensor_id: str,
+) -> str | None:
+    """Get the appropriate unit for a sensor based on unit system and hub type.
+
+    Args:
+        sensor_description: The sensor entity description
+        unit_system: The chosen unit system (UNIT_METRIC or UNIT_IMPERIAL)
+        hub_type: The hub type (HUB_TYPE_NOAA or HUB_TYPE_NDBC)
+        sensor_id: The sensor identifier
+
+    Returns:
+        str | None: The appropriate unit or None if not applicable
+    """
+    # For NOAA sensors with explicit unit configuration in description
+    if (
+        not sensor_description.is_ndbc
+        and sensor_description.unit_metric
+        and sensor_description.unit_imperial
+    ):
+        return (
+            sensor_description.unit_metric
+            if unit_system == const.UNIT_METRIC
+            else sensor_description.unit_imperial
+        )
+
+    # For NDBC sensors
+    if sensor_description.is_ndbc:
+        if unit_system == const.UNIT_IMPERIAL:
+            # Wind speed conversions (WSPD, GST) - m/s to mph
+            if sensor_id.endswith(("_wspd", "_gst")):
+                return UnitOfSpeed.MILES_PER_HOUR
+            # Temperature conversions (ATMP, WTMP, DEWP) - C to F
+            elif sensor_id.endswith(("_atmp", "_wtmp", "_dewp")):
+                return UnitOfTemperature.FAHRENHEIT
+            # Wave height conversions (WVHT, SwH, WWH) - meters to feet
+            elif sensor_id.endswith(("_wvht", "_swh", "_wwh")):
+                return UnitOfLength.FEET
+            # Pressure conversion (PRES) - hPa to inHg
+            elif sensor_id.endswith("_pres"):
+                return UnitOfPressure.INHG
+        elif sensor_id.endswith(("_wvht", "_swh", "_wwh")):
+            return UnitOfLength.METERS
+
+    # Default: use the native unit from the description
+    return sensor_description.native_unit_of_measurement
+
+
+# Composite sensor group definitions
+COMPOSITE_SENSOR_GROUPS = {
+    "wind_direction": ["wind_speed"],
+    "wind_speed": ["wind_direction"],
+    "currents_direction": ["currents_speed"],
+    "currents_speed": ["currents_direction"],
+}
+
+
+def is_part_of_composite_sensor(sensor_key: str) -> bool:
+    """Check if a sensor is part of a composite sensor group.
+
+    Some sensors like wind_direction and wind_speed are related and
+    are fetched together from the API.
+
+    Args:
+        sensor_key: The sensor key to check
+
+    Returns:
+        bool: True if this sensor is part of a composite group
+    """
+    return sensor_key in COMPOSITE_SENSOR_GROUPS
+
+
+def get_related_sensors(sensor_key: str) -> list[str]:
+    """Get the related sensors for a composite sensor.
+
+    Args:
+        sensor_key: The sensor key to get related sensors for
+
+    Returns:
+        list[str]: List of related sensor keys
+    """
+    return COMPOSITE_SENSOR_GROUPS.get(sensor_key, [])
