@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from typing import Any, Final
 
@@ -188,8 +187,19 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
                     SensorDeviceClass.DISTANCE,
                     SensorDeviceClass.SPEED,
                 ]:
-                    with contextlib.suppress(ValueError, TypeError):
+                    try:
                         self._attr_native_value = float(self._attr_native_value)
+                    except (ValueError, TypeError):
+                        _LOGGER.debug(
+                            "%s %s: Could not convert value '%s' to float for sensor %s",
+                            "NOAA Station"
+                            if self.coordinator.hub_type == const.HUB_TYPE_NOAA
+                            else "NDBC Buoy",
+                            self.coordinator.station_id,
+                            self._attr_native_value,
+                            self.entity_description.key,
+                        )
+                        # Keep the original value
 
         self.async_write_ha_state()
 
@@ -212,10 +222,18 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
         if isinstance(sensor_data, dict):
             return sensor_data.get("state") is not None
 
-        with contextlib.suppress(AttributeError):
+        try:
             return sensor_data.state is not None
-
-        return False
+        except AttributeError:
+            _LOGGER.debug(
+                "%s %s: Sensor data for %s does not have a state attribute",
+                "NOAA Station"
+                if self.coordinator.hub_type == const.HUB_TYPE_NOAA
+                else "NDBC Buoy",
+                self.coordinator.station_id,
+                self.entity_description.key,
+            )
+            return False
 
     def _check_composite_availability(self) -> bool:
         """Check availability of related sensors in this sensor's composite group."""
@@ -228,7 +246,17 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
                     if sensor_data.get("state") is not None:
                         return True
                 else:
-                    with contextlib.suppress(AttributeError):
+                    try:
                         if sensor_data.state is not None:
                             return True
+                    except AttributeError:
+                        _LOGGER.debug(
+                            "%s %s: Related sensor data for %s does not have a state attribute",
+                            "NOAA Station"
+                            if self.coordinator.hub_type == const.HUB_TYPE_NOAA
+                            else "NDBC Buoy",
+                            self.coordinator.station_id,
+                            related_sensor,
+                        )
+                        continue
         return False
