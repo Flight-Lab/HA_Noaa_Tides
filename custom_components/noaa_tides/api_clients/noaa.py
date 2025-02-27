@@ -37,7 +37,11 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 
 class NoaaApiClient(BaseApiClient):
-    """API client for NOAA data sources."""
+    """API client for NOAA data sources.
+
+    Handles fetching data from NOAA APIs with appropriate error handling
+    and data processing for each endpoint.
+    """
 
     def __init__(
         self,
