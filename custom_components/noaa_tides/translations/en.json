@@ -2,7 +2,7 @@
     "config": {
       "step": {
         "user": {
-          "title": "NOAA Tides Setup",
+          "title": "NOAA Tides Extended Setup",
           "description": "Choose between NOAA Station or NDBC Buoy data source",
           "data": {
             "hub_type": "Data Source Type"
@@ -53,7 +53,7 @@
     "options": {
       "step": {
         "init": {
-          "title": "NOAA Tides Options",
+          "title": "NOAA Tides Extended Options",
           "description": "Update integration settings",
           "data": {
             "update_interval": "Update Interval (60-3600 seconds)"
