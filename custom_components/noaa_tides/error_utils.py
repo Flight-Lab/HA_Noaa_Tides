@@ -1,4 +1,9 @@
-"""Error handling utilities for the NOAA Tides integration."""
+"""Error handling utilities for the NOAA Tides integration.
+
+This module provides utility functions for handling errors, converting
+standard exceptions to typed API exceptions, and generating user-friendly
+error messages.
+"""
 
 from __future__ import annotations
 
@@ -111,6 +116,8 @@ async def handle_api_error(
 async def handle_noaa_api_error(error: Exception, station_id: str) -> ApiError:
     """Handle NOAA API errors and return user-friendly messages.
 
+    Convenience wrapper around handle_api_error for NOAA-specific errors.
+
     Args:
         error: The exception that occurred
         station_id: The station ID
@@ -123,6 +130,8 @@ async def handle_noaa_api_error(error: Exception, station_id: str) -> ApiError:
 
 async def handle_ndbc_api_error(error: Exception, buoy_id: str) -> ApiError:
     """Handle NDBC API errors and return user-friendly messages.
+
+    Convenience wrapper around handle_api_error for NDBC-specific errors.
 
     Args:
         error: The exception that occurred
@@ -141,6 +150,9 @@ def map_exception_to_error(
     operation: str = "API call",
 ) -> Exception:
     """Map a generic exception to a more specific error type.
+
+    Converts standard Python exceptions to the appropriate
+    NOAA Tides typed exceptions based on the exception type.
 
     Args:
         exception: The original exception
