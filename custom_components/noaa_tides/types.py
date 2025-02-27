@@ -1,4 +1,4 @@
-"""Type definitions for the NOAA Tides integration."""
+"""Type definitions for the NOAA Tides Extended integration."""
 
 from __future__ import annotations
 
@@ -219,7 +219,7 @@ class CoordinatorData(TypedDict):
 
 @dataclass(frozen=True)
 class NoaaTidesSensorEntityDescription(SensorEntityDescription):
-    """Class describing NOAA Tides sensor entities."""
+    """Class describing NOAA Tides Extended sensor entities."""
 
     unit_metric: str | None = None
     unit_imperial: str | None = None
