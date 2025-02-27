@@ -8,122 +8,24 @@ from typing import Final, cast
 
 import aiohttp
 
+from homeassistant.const import (
+    UnitOfLength,
+    UnitOfPressure,
+    UnitOfSpeed,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import const
-from .types import ApiError, HubType, NoaaProductResponse, NoaaSensorResponse
+from .types import (
+    HubType,
+    NoaaProductResponse,
+    NoaaSensorResponse,
+    NoaaTidesSensorEntityDescription,
+)
 
 _LOGGER: Final = logging.getLogger(__name__)
-
-
-async def handle_api_error(
-    error: Exception, station_id: str, is_noaa: bool = True
-) -> ApiError:
-    """Handle API errors and return user-friendly messages.
-
-    Args:
-        error: The exception that occurred
-        station_id: The station or buoy ID
-        is_noaa: Whether this is a NOAA station (True) or NDBC buoy (False)
-
-    Returns:
-        ApiError: A structured error object with user-friendly messages
-    """
-    prefix = "Station" if is_noaa else "Buoy"
-    service_name = "NOAA" if is_noaa else "NDBC"
-    help_url = (
-        "https://tidesandcurrents.noaa.gov/stations.html"
-        if is_noaa
-        else "https://www.ndbc.noaa.gov/stations.shtml"
-    )
-
-    if isinstance(error, asyncio.TimeoutError):
-        return ApiError(
-            code="timeout",
-            message=f"{prefix} {station_id}: Connection timed out. Please check your internet connection.",
-            technical_detail=str(error),
-            help_url=help_url,
-        )
-
-    if isinstance(error, aiohttp.ClientResponseError):
-        if error.status == 404:
-            return ApiError(
-                code=f"{'station' if is_noaa else 'buoy'}_not_found",
-                message=f"{prefix} {station_id}: Not found. Please verify the {('station' if is_noaa else 'buoy')} ID.",
-                help_url=help_url,
-            )
-        if error.status in (500, 502, 503, 504):
-            return ApiError(
-                code="server_error",
-                message=f"{prefix} {station_id}: {service_name} service is temporarily unavailable. Please try again later.",
-                technical_detail=f"Status: {error.status}",
-            )
-        if error.status == 429:
-            return ApiError(
-                code="rate_limit",
-                message=f"{prefix} {station_id}: Too many requests to {service_name} API. Please try again later.",
-                technical_detail=f"Status: {error.status}",
-            )
-        return ApiError(
-            code=f"http_error_{error.status}",
-            message=f"{prefix} {station_id}: Unexpected HTTP error occurred.",
-            technical_detail=f"Status: {error.status}",
-        )
-
-    if isinstance(error, aiohttp.ClientConnectionError):
-        return ApiError(
-            code="connection_error",
-            message=f"{prefix} {station_id}: Could not connect to {service_name} service. Please check your internet connection.",
-            technical_detail=str(error),
-        )
-
-    if isinstance(error, ValueError):
-        return ApiError(
-            code="invalid_data",
-            message=f"{prefix} {station_id}: Received invalid data from {service_name} service.",
-            technical_detail=str(error),
-        )
-
-    # Handle NDBC-specific errors
-    if not is_noaa and isinstance(error, UnicodeDecodeError):
-        return ApiError(
-            code="decode_error",
-            message=f"Buoy {station_id}: Could not read NDBC data format.",
-            technical_detail=str(error),
-        )
-
-    return ApiError(
-        code="unknown",
-        message=f"{prefix} {station_id}: An unexpected error occurred while connecting to {service_name}.",
-        technical_detail=str(error),
-    )
-
-
-async def handle_noaa_api_error(error: Exception, station_id: str) -> ApiError:
-    """Handle NOAA API errors and return user-friendly messages.
-
-    Args:
-        error: The exception that occurred
-        station_id: The station ID
-
-    Returns:
-        ApiError: A structured error object with user-friendly messages
-    """
-    return await handle_api_error(error, station_id, is_noaa=True)
-
-
-async def handle_ndbc_api_error(error: Exception, buoy_id: str) -> ApiError:
-    """Handle NDBC API errors and return user-friendly messages.
-
-    Args:
-        error: The exception that occurred
-        buoy_id: The buoy ID
-
-    Returns:
-        ApiError: A structured error object with user-friendly messages
-    """
-    return await handle_api_error(error, buoy_id, is_noaa=False)
 
 
 async def validate_data_source(
@@ -190,7 +92,10 @@ async def validate_data_source(
             for response in responses:
                 if isinstance(response, Exception):
                     _LOGGER.debug(
-                        "NDBC Buoy %s: Error checking data: %s", source_id, response
+                        "NDBC Buoy %s: Error checking data: %s (%s)",
+                        source_id,
+                        str(response),
+                        type(response).__name__,
                     )
                     continue
 
@@ -201,7 +106,10 @@ async def validate_data_source(
                             valid_responses += 1
                     except Exception as err:
                         _LOGGER.debug(
-                            "NDBC Buoy %s: Error reading response: %s", source_id, err
+                            "NDBC Buoy %s: Error reading response: %s (%s)",
+                            source_id,
+                            str(err),
+                            type(err).__name__,
                         )
                         continue
 
@@ -209,10 +117,11 @@ async def validate_data_source(
 
     except Exception as err:
         _LOGGER.error(
-            "%s %s: Error validating: %s",
+            "%s %s: Error validating: %s (%s)",
             "NOAA Station" if hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
             source_id,
-            err,
+            str(err),
+            type(err).__name__,
         )
         return False
 
@@ -243,6 +152,9 @@ async def validate_ndbc_buoy(
     Returns:
         bool: True if buoy is valid, False otherwise
     """
+    _LOGGER.debug(
+        "NDBC Buoy %s: Validating buoy ID with sections %s", buoy_id, data_sections
+    )
     return await validate_data_source(hass, buoy_id, const.HUB_TYPE_NDBC, data_sections)
 
 
@@ -330,9 +242,10 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
 
             except Exception as err:
                 _LOGGER.debug(
-                    "NOAA Station %s: Error processing sensors data: %s",
+                    "NOAA Station %s: Error processing sensors data: %s (%s)",
                     station_id,
-                    err,
+                    str(err),
+                    type(err).__name__,
                 )
 
         _LOGGER.debug(
@@ -341,14 +254,28 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
         return sensors
 
     except Exception as err:
-        _LOGGER.error("NOAA Station %s: Error discovering sensors: %s", station_id, err)
+        _LOGGER.error(
+            "NOAA Station %s: Error discovering sensors: %s (%s)",
+            station_id,
+            str(err),
+            type(err).__name__,
+        )
         return {}
 
 
 async def discover_ndbc_sensors(
     hass: HomeAssistant, buoy_id: str, data_sections: list[str]
 ) -> dict[str, str]:
-    """Discover available sensors for an NDBC buoy."""
+    """Discover available sensors for an NDBC buoy.
+
+    Args:
+        hass: HomeAssistant instance
+        buoy_id: NDBC buoy identifier
+        data_sections: Selected data sections to check
+
+    Returns:
+        dict[str, str]: Dictionary mapping sensor keys to display names
+    """
     try:
         session = async_get_clientsession(hass)
         sensors: dict[str, str] = {}
@@ -527,7 +454,12 @@ async def discover_ndbc_sensors(
         return sensors
 
     except Exception as err:
-        _LOGGER.error("NDBC Buoy %s: Error discovering sensors: %s", buoy_id, err)
+        _LOGGER.error(
+            "NDBC Buoy %s: Error discovering sensors: %s (%s)",
+            buoy_id,
+            str(err),
+            type(err).__name__,
+        )
         return {}
 
 
@@ -565,3 +497,90 @@ def degrees_to_cardinal(degrees: float | None) -> str | None:
     # Convert degrees to 0-15 range for array index
     index = int((degrees + 11.25) / 22.5) % 16
     return directions[index]
+
+
+def get_unit_for_sensor(
+    sensor_description: NoaaTidesSensorEntityDescription,
+    unit_system: str,
+    hub_type: str,
+    sensor_id: str,
+) -> str | None:
+    """Get the appropriate unit for a sensor based on unit system and hub type.
+
+    Args:
+        sensor_description: The sensor entity description
+        unit_system: The chosen unit system (UNIT_METRIC or UNIT_IMPERIAL)
+        hub_type: The hub type (HUB_TYPE_NOAA or HUB_TYPE_NDBC)
+        sensor_id: The sensor identifier
+
+    Returns:
+        str | None: The appropriate unit or None if not applicable
+    """
+    # For NOAA sensors with explicit unit configuration in description
+    if (
+        not sensor_description.is_ndbc
+        and sensor_description.unit_metric
+        and sensor_description.unit_imperial
+    ):
+        return (
+            sensor_description.unit_metric
+            if unit_system == const.UNIT_METRIC
+            else sensor_description.unit_imperial
+        )
+
+    # For NDBC sensors
+    if sensor_description.is_ndbc:
+        if unit_system == const.UNIT_IMPERIAL:
+            # Wind speed conversions (WSPD, GST) - m/s to mph
+            if sensor_id.endswith(("_wspd", "_gst")):
+                return UnitOfSpeed.MILES_PER_HOUR
+            # Temperature conversions (ATMP, WTMP, DEWP) - C to F
+            elif sensor_id.endswith(("_atmp", "_wtmp", "_dewp")):
+                return UnitOfTemperature.FAHRENHEIT
+            # Wave height conversions (WVHT, SwH, WWH) - meters to feet
+            elif sensor_id.endswith(("_wvht", "_swh", "_wwh")):
+                return UnitOfLength.FEET
+            # Pressure conversion (PRES) - hPa to inHg
+            elif sensor_id.endswith("_pres"):
+                return UnitOfPressure.INHG
+        elif sensor_id.endswith(("_wvht", "_swh", "_wwh")):
+            return UnitOfLength.METERS
+
+    # Default: use the native unit from the description
+    return sensor_description.native_unit_of_measurement
+
+
+# Composite sensor group definitions
+COMPOSITE_SENSOR_GROUPS = {
+    "wind_direction": ["wind_speed"],
+    "wind_speed": ["wind_direction"],
+    "currents_direction": ["currents_speed"],
+    "currents_speed": ["currents_direction"],
+}
+
+
+def is_part_of_composite_sensor(sensor_key: str) -> bool:
+    """Check if a sensor is part of a composite sensor group.
+
+    Some sensors like wind_direction and wind_speed are related and
+    are fetched together from the API.
+
+    Args:
+        sensor_key: The sensor key to check
+
+    Returns:
+        bool: True if this sensor is part of a composite group
+    """
+    return sensor_key in COMPOSITE_SENSOR_GROUPS
+
+
+def get_related_sensors(sensor_key: str) -> list[str]:
+    """Get the related sensors for a composite sensor.
+
+    Args:
+        sensor_key: The sensor key to get related sensors for
+
+    Returns:
+        list[str]: List of related sensor keys
+    """
+    return COMPOSITE_SENSOR_GROUPS.get(sensor_key, [])

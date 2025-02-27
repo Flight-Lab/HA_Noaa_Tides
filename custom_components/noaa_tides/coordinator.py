@@ -3,24 +3,29 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import timedelta
 import logging
-import math
-from typing import Any, Final, Literal, NotRequired, TypedDict
+from typing import Any, Final, Literal
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from . import const
+from .api_clients import NoaaApiClient, NdbcApiClient
+from .errors import NoaaApiError, NdbcApiError, ApiError
 from .types import CoordinatorData
-from .utils import degrees_to_cardinal, handle_ndbc_api_error, handle_noaa_api_error
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER: Final = logging.getLogger(__name__)
 
 
 class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
-    """Class to manage fetching NOAA Tides data."""
+    """Class to manage fetching NOAA Tides data.
+
+    Error handling strategy:
+    - Tracks consecutive failures to provide better error messages
+    - Falls back to cached data for transient errors when possible
+    - Raises UpdateFailed with user-friendly messages for UI display
+    """
 
     def __init__(
         self,
@@ -51,7 +56,16 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self.timezone: Final = timezone
         self.unit_system: Final = unit_system
         self.data_sections: Final = data_sections or []
-        self.session: Final = async_get_clientsession(hass)
+
+        # Initialize the appropriate API client
+        if hub_type == const.HUB_TYPE_NOAA:
+            self.api_client: Final = NoaaApiClient(
+                hass, station_id, timezone, unit_system
+            )
+        else:
+            self.api_client: Final = NdbcApiClient(
+                hass, station_id, timezone, unit_system, data_sections
+            )
 
         super().__init__(
             hass,
@@ -60,966 +74,302 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             update_interval=timedelta(seconds=update_interval),
         )
 
+        # Track consecutive failures for better error reporting
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 3
+        # Track partially failed sensors
+        self._failed_sensors: dict[str, int] = {}
+
     async def _async_update_data(self) -> CoordinatorData:
-        """Fetch data from NOAA/NDBC APIs."""
+        """Fetch data from NOAA/NDBC APIs.
+
+        Handles various error conditions:
+        - Connection timeouts (retries with backoff)
+        - API errors (converts to user-friendly messages)
+        - Data validation errors (logs details for debugging)
+        - Server errors (uses cached data if available)
+
+        Returns:
+            CoordinatorData: The fetched data
+
+        Raises:
+            UpdateFailed: If there's an error fetching data after retries
+        """
+        source_type = (
+            "NOAA station" if self.hub_type == const.HUB_TYPE_NOAA else "NDBC buoy"
+        )
+
         try:
+            # Set a timeout for the entire data fetch operation
             async with asyncio.timeout(30):
-                if self.hub_type == const.HUB_TYPE_NOAA:
-                    return await self._fetch_noaa_data()
-                return await self._fetch_ndbc_data()
-        except asyncio.TimeoutError as err:
-            error_handler = (
-                handle_noaa_api_error
-                if self.hub_type == const.HUB_TYPE_NOAA
-                else handle_ndbc_api_error
-            )
-            api_error = await error_handler(err, self.station_id)
+                # Attempt to fetch data
+                data = await self.api_client.fetch_data(self.selected_sensors)
+
+                # Check if we got any data at all
+                if not data:
+                    self._consecutive_failures += 1
+
+                    # Provide more detailed error after multiple consecutive failures
+                    if self._consecutive_failures >= self._max_consecutive_failures:
+                        raise UpdateFailed(
+                            f"No data available from {source_type} {self.station_id} "
+                            f"after {self._consecutive_failures} attempts. "
+                            f"The service may be experiencing issues."
+                        )
+                    else:
+                        _LOGGER.warning(
+                            "%s %s: No data returned (attempt %d/%d)",
+                            source_type.capitalize(),
+                            self.station_id,
+                            self._consecutive_failures,
+                            self._max_consecutive_failures,
+                        )
+                        # If we have previous data, use it instead of failing completely
+                        if self.data:
+                            _LOGGER.info(
+                                "%s %s: Using cached data for this update",
+                                source_type.capitalize(),
+                                self.station_id,
+                            )
+                            return self.data
+
+                        raise UpdateFailed(
+                            f"No data available from {source_type} {self.station_id}. "
+                            f"Will retry."
+                        )
+
+                # Check for partial failures by identifying missing sensors
+                missing_sensors = self._get_missing_sensors(data)
+
+                if missing_sensors:
+                    # Update failure counts for missing sensors
+                    for sensor in missing_sensors:
+                        self._failed_sensors[sensor] = (
+                            self._failed_sensors.get(sensor, 0) + 1
+                        )
+
+                        # Log at warning level if the sensor has failed multiple times
+                        if (
+                            self._failed_sensors[sensor]
+                            >= self._max_consecutive_failures
+                        ):
+                            _LOGGER.warning(
+                                "%s %s: Sensor '%s' has failed to return data %d times in a row",
+                                source_type.capitalize(),
+                                self.station_id,
+                                sensor,
+                                self._failed_sensors[sensor],
+                            )
+                        else:
+                            _LOGGER.debug(
+                                "%s %s: Sensor '%s' returned no data (attempt %d/%d)",
+                                source_type.capitalize(),
+                                self.station_id,
+                                sensor,
+                                self._failed_sensors[sensor],
+                                self._max_consecutive_failures,
+                            )
+
+                # Reset the consecutive failure counter since we got some data
+                self._consecutive_failures = 0
+
+                # Reset failure counts for sensors that are now working
+                for sensor in list(self._failed_sensors.keys()):
+                    if sensor not in missing_sensors:
+                        del self._failed_sensors[sensor]
+
+                return data
+
+        except asyncio.TimeoutError:
+            self._consecutive_failures += 1
+
             _LOGGER.error(
-                "%s %s: %s Technical details: %s",
-                "NOAA Station" if self.hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
+                "%s %s: Timeout fetching data (attempt %d/%d)",
+                source_type.capitalize(),
                 self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
-            raise UpdateFailed(api_error.message)
-        except Exception as err:
-            error_handler = (
-                handle_noaa_api_error
-                if self.hub_type == const.HUB_TYPE_NOAA
-                else handle_ndbc_api_error
-            )
-            api_error = await error_handler(err, self.station_id)
-            _LOGGER.error(
-                "%s %s: %s Technical details: %s",
-                "NOAA Station" if self.hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
-                self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
-            raise UpdateFailed(api_error.message)
-
-    async def _fetch_noaa_data(self) -> dict[str, Any]:
-        """Fetch data from NOAA API."""
-        try:
-            data = {}
-            tasks = []
-
-            # Prepare tasks for selected sensors
-            has_wind = (
-                "wind_speed" in self.selected_sensors
-                or "wind_direction" in self.selected_sensors
-            )
-            has_currents = (
-                "currents_speed" in self.selected_sensors
-                or "currents_direction" in self.selected_sensors
+                self._consecutive_failures,
+                self._max_consecutive_failures,
             )
 
-            for sensor in self.selected_sensors:
-                if sensor == "tide_predictions":
-                    tasks.append(self._fetch_tide_predictions())
-                elif sensor == "currents_predictions":
-                    tasks.append(self._fetch_noaa_currents_predictions())
-                elif sensor in "currents_speed, currents_direction":
-                    if has_currents:
-                        tasks.append(self._fetch_noaa_currents_data())
-                        has_currents = False  # Prevent duplicate tasks
-                elif sensor == "water_level":
-                    tasks.append(self._fetch_noaa_sensor_data(sensor))
-                elif sensor in ["wind_speed", "wind_direction"]:
-                    # Only add wind task once if either wind sensor is selected
-                    if has_wind:
-                        tasks.append(self._fetch_noaa_wind_data())
-                        has_wind = False  # Prevent duplicate tasks
-                else:
-                    tasks.append(self._fetch_noaa_sensor_reading(sensor))
-
-            # Execute all tasks concurrently
-            async with asyncio.TaskGroup() as tg:
-                results = [tg.create_task(task) for task in tasks]
-
-            # Combine results
-            for result in results:
-                try:
-                    sensor_data = result.result()
-                    if sensor_data:
-                        data.update(sensor_data)
-                except Exception as err:
-                    _LOGGER.error(
-                        "NOAA Station %s: Error processing sensor data: %s",
+            # Provide more detailed error after multiple consecutive timeouts
+            if self._consecutive_failures >= self._max_consecutive_failures:
+                raise UpdateFailed(
+                    f"Timeout fetching data from {source_type} {self.station_id} "
+                    f"after {self._consecutive_failures} attempts. "
+                    f"Check your internet connection and the service status."
+                )
+            else:
+                # If we have previous data, use it instead of failing completely
+                if self.data:
+                    _LOGGER.info(
+                        "%s %s: Using cached data for this update due to timeout",
+                        source_type.capitalize(),
                         self.station_id,
-                        err,
                     )
+                    return self.data
 
-            return data
-        except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
+                raise UpdateFailed(
+                    f"Timeout fetching data from {source_type} {self.station_id}. "
+                    f"Will retry."
+                )
+
+        except UpdateFailed as err:
+            # For UpdateFailed exceptions, track failures but re-raise with the same message
+            self._consecutive_failures += 1
             _LOGGER.error(
-                "NOAA Station %s: Error fetching data: %s. Technical details: %s",
+                "%s %s: Update failed (attempt %d/%d): %s",
+                source_type.capitalize(),
                 self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
-            raise UpdateFailed(api_error.message)
-
-    async def _fetch_tide_predictions(self) -> dict[str, Any]:
-        """Fetch tide predictions and calculate tide state."""
-        params = {
-            "station": self.station_id,
-            "product": "predictions",
-            "datum": "MLLW",
-            "time_zone": self.timezone,
-            "units": "metric" if self.unit_system == const.UNIT_METRIC else "english",
-            "format": "json",
-            "interval": "hilo",  # Get only high/low predictions
-            "begin_date": datetime.now().strftime("%Y%m%d"),
-            "range": 48,  # Get 48 hours of predictions
-        }
-
-        try:
-            async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    error_msg = f"NOAA Station{self.station_id}: Error fetching tide predictions"
-                    _LOGGER.error("%s: HTTP %s", error_msg, response.status)
-                    raise UpdateFailed(error_msg)
-
-                data = await response.json()
-                predictions = data.get("predictions", [])
-
-                if not predictions:
-                    return {}
-
-                now = datetime.now()
-
-                # Convert predictions to datetime objects
-                formatted_predictions = []
-                for pred in predictions:
-                    pred_time = datetime.strptime(pred.get("t", ""), "%Y-%m-%d %H:%M")
-                    formatted_predictions.append(
-                        {
-                            "time": pred_time,
-                            "type": pred.get("type", ""),
-                            "level": float(pred.get("v", 0)),
-                        }
-                    )
-
-                # Sort predictions by time
-                formatted_predictions.sort(key=lambda x: x["time"])
-
-                # Find last tide and next tide
-                last_tide = None
-                next_tide = None
-                following_tide = None
-
-                for pred in formatted_predictions:
-                    if pred["time"] <= now:
-                        last_tide = pred
-                    elif next_tide is None:
-                        next_tide = pred
-                    elif following_tide is None:
-                        following_tide = pred
-                        break
-
-                if not (last_tide and next_tide):
-                    return {}
-
-                # Calculate tide factor and percentage
-                predicted_period = (
-                    next_tide["time"] - last_tide["time"]
-                ).total_seconds()
-                elapsed_time = (now - last_tide["time"]).total_seconds()
-
-                if elapsed_time < 0 or elapsed_time > predicted_period:
-                    return {}
-
-                if next_tide["type"] == "H":
-                    tide_factor = 50 - (
-                        50 * math.cos(elapsed_time * math.pi / predicted_period)
-                    )
-                else:
-                    tide_factor = 50 + (
-                        50 * math.cos(elapsed_time * math.pi / predicted_period)
-                    )
-
-                tide_percentage = (elapsed_time / predicted_period) * 50
-                if next_tide["type"] == "H":
-                    tide_percentage += 50
-
-                # Format the tide state to show next tide and time
-                next_tide_type = "High" if next_tide["type"] == "H" else "Low"
-                next_tide_time = next_tide["time"].strftime("%-I:%M %p")
-                tide_state = f"{next_tide_type} tide at {next_tide_time}"
-
-                return {
-                    "tide_predictions": {
-                        "state": tide_state,
-                        "attributes": {
-                            const.ATTR_NEXT_TIDE_TYPE: "High"
-                            if next_tide["type"] == "H"
-                            else "Low",
-                            const.ATTR_NEXT_TIDE_TIME: next_tide["time"].strftime(
-                                "%-I:%M %p"
-                            ),
-                            const.ATTR_NEXT_TIDE_LEVEL: next_tide["level"],
-                            const.ATTR_FOLLOWING_TIDE_TYPE: "High"
-                            if following_tide["type"] == "H"
-                            else "Low",
-                            const.ATTR_FOLLOWING_TIDE_TIME: following_tide[
-                                "time"
-                            ].strftime("%-I:%M %p"),
-                            const.ATTR_FOLLOWING_TIDE_LEVEL: following_tide["level"],
-                            const.ATTR_LAST_TIDE_TYPE: "High"
-                            if last_tide["type"] == "H"
-                            else "Low",
-                            const.ATTR_LAST_TIDE_TIME: last_tide["time"].strftime(
-                                "%-I:%M %p"
-                            ),
-                            const.ATTR_LAST_TIDE_LEVEL: last_tide["level"],
-                            const.ATTR_TIDE_FACTOR: round(tide_factor, 2),
-                            const.ATTR_TIDE_PERCENTAGE: round(tide_percentage, 2),
-                        },
-                    }
-                }
-
-        except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NOAA Station %s: Error calculating tide predictions: %s. Technical details: %s",
-                self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
+                self._consecutive_failures,
+                self._max_consecutive_failures,
+                str(err),
             )
 
-    async def _fetch_noaa_sensor_data(self, sensor_type: str) -> dict[str, Any]:
-        """Fetch data for a specific NOAA sensor.
+            # If we have previous data and haven't failed too many times, use cached data
+            if (
+                self.data
+                and self._consecutive_failures < self._max_consecutive_failures
+            ):
+                _LOGGER.info(
+                    "%s %s: Using cached data for this update due to error",
+                    source_type.capitalize(),
+                    self.station_id,
+                )
+                return self.data
+
+            raise
+
+        except (NoaaApiError, NdbcApiError) as err:
+            self._consecutive_failures += 1
+
+            # Extract the ApiError details for better error messages
+            api_error = getattr(err, "api_error", None)
+
+            # Format a helpful error message
+            if api_error and isinstance(api_error, ApiError):
+                error_msg = (
+                    f"{'NOAA Station' if self.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} "
+                    f"{self.station_id}: {api_error.message} (Error code: {api_error.code})"
+                )
+                if api_error.help_url:
+                    error_msg += f" See {api_error.help_url} for more information."
+            else:
+                error_msg = f"{'NOAA Station' if self.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} {self.station_id}: {str(err)}"
+
+            _LOGGER.error(error_msg)
+
+            # If we have previous data and haven't failed too many times, use cached data
+            if (
+                self.data
+                and self._consecutive_failures < self._max_consecutive_failures
+            ):
+                _LOGGER.info(
+                    "%s %s: Using cached data for this update due to error",
+                    source_type.capitalize(),
+                    self.station_id,
+                )
+                return self.data
+
+            raise UpdateFailed(error_msg) from err
+
+        except Exception as err:
+            # For all other exceptions, create a nice message and track failures
+            self._consecutive_failures += 1
+
+            _LOGGER.error(
+                "%s %s: Unexpected error fetching data (attempt %d/%d): %s (%s)",
+                source_type.capitalize(),
+                self.station_id,
+                self._consecutive_failures,
+                self._max_consecutive_failures,
+                str(err),
+                type(err).__name__,
+            )
+
+            # If we have previous data and haven't failed too many times, use cached data
+            if (
+                self.data
+                and self._consecutive_failures < self._max_consecutive_failures
+            ):
+                _LOGGER.info(
+                    "%s %s: Using cached data for this update due to error",
+                    source_type.capitalize(),
+                    self.station_id,
+                )
+                return self.data
+
+            raise UpdateFailed(
+                f"Error fetching data from {source_type} {self.station_id}: {str(err)}"
+            )
+
+    def _get_missing_sensors(self, data: CoordinatorData) -> list[str]:
+        """Identify selected sensors that are missing from the data.
+
+        Used to track partial failures when some sensors don't return data.
 
         Args:
-            sensor_type: The type of sensor to fetch data for (e.g., 'water_level')
+            data: The data returned from the API
 
         Returns:
-            dict[str, Any]: Dictionary containing the sensor data if available
+            list[str]: List of selected sensors that are missing from the data
         """
-        params = {
-            "station": self.station_id,
-            "product": sensor_type,
-            "time_zone": self.timezone,
-            "units": "metric" if self.unit_system == const.UNIT_METRIC else "english",
-            "format": "json",
-            "date": "latest",
-        }
+        missing_sensors = []
 
-        # Add datum parameter for water level requests
-        if sensor_type == "water_level":
-            params["datum"] = "MLLW"  # Mean Lower Low Water datum
+        for sensor in self.selected_sensors:
+            # Skip checking sensors that are part of composite data
+            if self._is_composite_sensor(sensor, data):
+                continue
 
-        try:
-            _LOGGER.debug(
-                "NOAA Station %s: Fetching sensor data for %s with params: %s",
-                self.station_id,
-                sensor_type,
-                {
-                    k: v for k, v in params.items() if k != "format"
-                },  # Exclude format for cleaner logs
-            )
+            # Check if the sensor data exists and has a state
+            if sensor not in data or not self._has_valid_state(data[sensor]):
+                missing_sensors.append(sensor)
 
-            async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    _LOGGER.error(
-                        "NOAA Station %s: Error fetching %s data. Status: %s",
-                        self.station_id,
-                        sensor_type,
-                        response.status,
-                    )
-                    return {}
+        return missing_sensors
 
-                data = await response.json()
+    def _is_composite_sensor(self, sensor_id: str, data: CoordinatorData) -> bool:
+        """Check if a sensor is part of composite data created from other sensors.
 
-                if not data.get("data"):
-                    _LOGGER.error(
-                        "NOAA Station %s: No data returned for %s. Response: %s",
-                        self.station_id,
-                        sensor_type,
-                        data,
-                    )
-                    return {}
+        Some sensors like wind_direction and wind_speed are fetched together.
 
-                latest = data["data"][0]
-
-                # Only log the latest data point for water level at debug level
-                if sensor_type == "water_level":
-                    _LOGGER.debug(
-                        "NOAA Station %s: Latest water level reading - Value: %s %s, Time: %s, Datum: MLLW",
-                        self.station_id,
-                        latest.get("v", "N/A"),
-                        "meters" if self.unit_system == const.UNIT_METRIC else "feet",
-                        latest.get("t", "N/A"),
-                    )
-
-                return {
-                    sensor_type: {
-                        "state": float(latest.get("v", 0)),
-                        "attributes": {
-                            "time": latest.get("t"),
-                            "datum": "MLLW",  # Add datum to attributes
-                        },
-                    }
-                }
-        except Exception as err:
-            _LOGGER.error(
-                "NOAA Station %s: Error fetching sensor data for %s: %s",
-                self.station_id,
-                sensor_type,
-                err,
-            )
-            return {}
-
-    async def _fetch_noaa_currents_predictions(self) -> dict[str, Any]:
-        """Fetch NOAA currents predictions.
-
-        Handles two different API response formats:
-        1. Predictions with explicit Type (slack/ebb/flood)
-        2. Predictions with just Velocity_Major where direction must be inferred
+        Args:
+            sensor_id: The sensor ID to check
+            data: The current data
 
         Returns:
-            dict[str, Any]: Dictionary containing currents prediction data if available
+            bool: True if this sensor's data is part of a composite
         """
-        params = {
-            "station": self.station_id,
-            "product": "currents_predictions",
-            "time_zone": self.timezone,
-            "units": "metric" if self.unit_system == const.UNIT_METRIC else "english",
-            "format": "json",
-            "begin_date": datetime.now().strftime("%Y%m%d"),
-            "range": 48,  # Get 48 hours of predictions
+        # Define composite relationships
+        composites = {
+            "wind_direction": ["wind_speed"],
+            "wind_speed": ["wind_direction"],
+            "currents_direction": ["currents_speed"],
+            "currents_speed": ["currents_direction"],
         }
 
-        try:
-            async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    raise UpdateFailed(
-                        f"{self.station_id}: Error fetching currents predictions: {response.status}"
-                    )
-
-                data = await response.json()
-
-                # Get the predictions array
-                predictions = data.get("current_predictions", {}).get("cp", [])
-
-                if not predictions:
-                    _LOGGER.debug(
-                        "NOAA Station %s: No currents predictions data available",
-                        self.station_id,
-                    )
-                    return {}
-
-                # Get the most recent prediction
-                latest = predictions[0]
-
-                # Log only relevant fields from the latest prediction
-                _LOGGER.debug(
-                    "NOAA Station %s: Latest currents prediction - Time: %s, Velocity: %s, Type: %s, "
-                    "Flood Dir: %s, Ebb Dir: %s",
-                    self.station_id,
-                    latest.get("Time", "N/A"),
-                    latest.get("Velocity_Major", "N/A"),
-                    latest.get("Type", "N/A"),
-                    latest.get("meanFloodDir", "N/A"),
-                    latest.get("meanEbbDir", "N/A"),
-                )
-
-                # Extract common values
-                time = latest.get("Time", "")
-                velocity = float(latest.get("Velocity_Major", 0))
-
-                # First check for explicit Type field (Structure A)
-                type_value = latest.get("Type", "").lower()
-
-                # If no explicit type, infer from velocity (Structure B)
-                if not type_value:
-                    if abs(velocity) <= 0.1:  # Define slack water threshold
-                        type_value = "slack"
-                    elif velocity > 0:
-                        type_value = "flood"
-                    else:
-                        type_value = "ebb"
-
-                # Get appropriate direction based on current type
-                direction = float(
-                    latest.get("meanFloodDir", 0)
-                    if type_value == "flood"
-                    else latest.get("meanEbbDir", 0)
-                    if type_value == "ebb"
-                    else 0  # Use 0 for slack water
-                )
-
-                return_data = {
-                    "currents_predictions": {
-                        "state": type_value,
-                        "attributes": {
-                            const.ATTR_CURRENTS_DIRECTION: direction,
-                            const.ATTR_CURRENTS_SPEED: abs(velocity),
-                            const.ATTR_CURRENTS_TIME: time,
-                        },
-                    }
-                }
-
-                # Log the processed and structured return data
-                _LOGGER.debug(
-                    "NOAA Station %s: Processed currents prediction - State: %s, Direction: %.1f°, "
-                    "Speed: %.2f %s, Time: %s",
-                    self.station_id,
-                    type_value,
-                    direction,
-                    abs(velocity),
-                    "m/s" if self.unit_system == const.UNIT_METRIC else "knots",
-                    time,
-                )
-
-                return return_data
-
-        except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NOAA Station %s: Error fetching currents predictions: %s. Technical details: %s",
-                self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
+        # Check if any of the composite's related sensors are in the data
+        if sensor_id in composites:
+            return any(
+                dep in data and self._has_valid_state(data[dep])
+                for dep in composites[sensor_id]
             )
-            return {}
 
-    async def _fetch_noaa_currents_data(self) -> dict[str, Any]:
-        """Fetch NOAA currents data."""
-        params = {
-            "station": self.station_id,
-            "product": "currents",
-            "time_zone": self.timezone,
-            "units": "metric" if self.unit_system == const.UNIT_METRIC else "english",
-            "format": "json",
-            "date": "latest",
-        }
+        return False
 
-        try:
-            async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    _LOGGER.error(
-                        "NOAA Station %s: Error fetching currents data. Status: %s",
-                        self.station_id,
-                        response.status,
-                    )
-                    return {}
+    def _has_valid_state(self, sensor_data: Any) -> bool:
+        """Check if sensor data has a valid state.
 
-                data = await response.json()
-                if not data.get("data"):
-                    return {}
-
-                latest = data["data"][0]
-                speed = float(latest.get("s", 0))
-                direction = float(latest.get("d", 0))
-
-                return {
-                    "currents_speed": {
-                        "state": speed,
-                        "attributes": {
-                            "direction": direction,
-                            "time": latest.get("t"),
-                            "units": "m/s"
-                            if self.unit_system == const.UNIT_METRIC
-                            else "knots",
-                        },
-                    },
-                    "currents_direction": {
-                        "state": direction,
-                        "attributes": {
-                            "speed": speed,
-                            "time": latest.get("t"),
-                        },
-                    },
-                }
-
-        except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NOAA Station %s: Error fetching currents data: %s. Technical details: %s",
-                self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
-            return {}
-
-    async def _fetch_noaa_wind_data(self) -> dict[str, Any]:
-        """Fetch wind data from NOAA API."""
-        _LOGGER.debug("NOAA Station %s: Fetching wind data", self.station_id)
-
-        params = {
-            "station": self.station_id,
-            "product": "wind",
-            "time_zone": self.timezone,
-            "units": "metric" if self.unit_system == const.UNIT_METRIC else "english",
-            "format": "json",
-            "date": "latest",
-        }
-
-        try:
-            async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    _LOGGER.error(
-                        "NOAA Station %s: Error fetching wind data. Status: %s",
-                        self.station_id,
-                        response.status,
-                    )
-                    return {}
-
-                data = await response.json()
-                if not data.get("data"):
-                    return {}
-
-                latest = data["data"][0]
-                speed = float(latest.get("s", 0))
-                direction = float(latest.get("d", 0))
-                gust = latest.get("g")
-                direction_cardinal = latest.get("dr", "")
-
-                return {
-                    "wind_speed": {
-                        "state": speed,
-                        "attributes": {
-                            "direction": direction,
-                            "direction_cardinal": direction_cardinal,
-                            "gust": float(gust) if gust else None,
-                            "time": latest.get("t"),
-                            "flags": latest.get("f"),
-                        },
-                    },
-                    "wind_direction": {
-                        "state": direction,
-                        "attributes": {
-                            "direction_cardinal": direction_cardinal,
-                            "speed": speed,
-                            "gust": float(gust) if gust else None,
-                            "time": latest.get("t"),
-                            "flags": latest.get("f"),
-                        },
-                    },
-                }
-
-        except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NOAA Station %s: Error fetching wind data: %s. Technical details: %s",
-                self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
-            return {}
-
-    async def _fetch_noaa_sensor_reading(self, sensor_type: str) -> dict[str, Any]:
-        """Fetch the latest reading for a NOAA environmental sensor."""
-        if sensor_type == "wind":
-            return await self._fetch_noaa_wind_data()
-        try:
-            params = {
-                "station": self.station_id,
-                "date": "latest",
-                "time_zone": self.timezone,
-                "units": "metric"
-                if self.unit_system == const.UNIT_METRIC
-                else "english",
-                "format": "json",
-            }
-
-            # Map sensor types to their API parameter names
-            product_map = {
-                "water_temperature": "water_temperature",
-                "air_temperature": "air_temperature",
-                "air_pressure": "air_pressure",
-                "humidity": "relative_humidity",
-                "conductivity": "conductivity",
-            }
-
-            if sensor_type not in product_map:
-                return {}
-
-            params["product"] = product_map[sensor_type]
-
-            async with self.session.get(const.NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    return {}
-
-                data = await response.json()
-                if not data.get("data"):
-                    return {}
-
-                latest = data["data"][0]
-                value = latest.get("v", None)
-                if value is None:
-                    return {}
-
-                # For all other sensors, return single value
-                return {
-                    sensor_type: {
-                        "state": float(value),
-                        "attributes": {
-                            "time": latest.get("t"),
-                            "flags": latest.get("f"),  # Quality flags if available
-                        },
-                    }
-                }
-
-        except asyncio.TimeoutError as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NOAA Station %s: Timeout fetching sensor %s: %s. Technical details: %s",
-                self.station_id,
-                sensor_type,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
-            return {}
-        except ValueError as err:
-            # Handle value conversion errors
-            _LOGGER.error(
-                "NOAA Station %s: Invalid value received for sensor %s at station %s: %s",
-                self.station_id,
-                sensor_type,
-                err,
-            )
-            return {}
-        except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NOAA Station %s: Error fetching sensor %s: %s. Technical details: %s",
-                self.station_id,
-                sensor_type,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
-            return {}
-
-    async def _fetch_ndbc_data(self) -> dict[str, Any]:
-        """Fetch data from NDBC APIs."""
-        try:
-            data = {}
-            tasks = []
-
-            # Create tasks based on selected data sections
-            if const.DATA_METEOROLOGICAL in self.data_sections:
-                tasks.append(self._fetch_ndbc_meteorological())
-            if const.DATA_SPECTRAL_WAVE in self.data_sections:
-                tasks.append(self._fetch_ndbc_spectral_wave())
-            if const.DATA_OCEAN_CURRENT in self.data_sections:
-                tasks.append(self._fetch_ndbc_ocean_current())
-
-            # Execute all tasks concurrently
-            async with asyncio.TaskGroup() as tg:
-                results = [tg.create_task(task) for task in tasks]
-
-            # Combine results
-            for result in results:
-                try:
-                    section_data = result.result()
-                    if section_data:
-                        data.update(section_data)
-                except Exception as err:
-                    _LOGGER.error(
-                        "NDBC Buoy %s: Error processing data: %s", self.station_id, err
-                    )
-
-            return data
-        except Exception as err:
-            api_error = await handle_ndbc_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NDBC Buoy %s: Error fetching data: %s. Technical details: %s",
-                self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
-            raise UpdateFailed(api_error.message)
-
-    async def _fetch_ndbc_meteorological(self) -> dict[str, Any]:
-        """Fetch meteorological data from NDBC."""
-        try:
-            url = const.NDBC_METEO_URL.format(buoy_id=self.station_id)
-            async with self.session.get(url) as response:
-                if response.status != 200:
-                    return {}
-
-                text = await response.text()
-                lines = text.strip().split("\n")
-
-                if len(lines) < 3:  # Need header, units, and at least one data line
-                    return {}
-
-                headers = lines[0].strip().split()
-                units = lines[1].strip().split()  # Units line
-                data = lines[2].strip().split()  # Most recent data line
-
-                result = {}
-                for i, header in enumerate(headers):
-                    sensor_id = f"meteo_{header.lower()}"
-                    if sensor_id in self.selected_sensors:
-                        try:
-                            if i < len(data) and data[i] != "MM" and data[i] != "999":
-                                # Store original value before conversion
-                                original_value = float(data[i])
-                                # Round original value to 2 decimal places
-                                value = round(original_value, 2)
-
-                                # Initialize attributes
-                                attributes: dict[str, Any] = {
-                                    "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                                }
-
-                                # Convert values if imperial units are requested
-                                if self.unit_system == const.UNIT_IMPERIAL:
-                                    # Temperature conversions (ATMP, WTMP, DEWP) - Celsius to Fahrenheit
-                                    if header in ["ATMP", "WTMP", "DEWP"]:
-                                        value = round((value * 9 / 5) + 32, 2)
-                                        # Store original value and unit for reference
-                                        attributes["raw_value"] = str(original_value)
-                                        attributes["unit"] = "°C"
-
-                                    # Wind speed and gust conversions (WSPD, GST) - m/s to mph
-                                    elif header in ["WSPD", "GST"]:
-                                        value = round(value * 2.23694, 2)
-                                        attributes["raw_value"] = str(original_value)
-                                        attributes["unit"] = "m/s"
-
-                                    # Wave height conversion (WVHT) - meters to feet
-                                    elif header == "WVHT":
-                                        value = round(value * 3.28084, 2)
-                                        attributes["raw_value"] = str(original_value)
-                                        attributes["unit"] = "m"
-
-                                    # Pressure conversion (PRES) - hPa to inHg
-                                    elif header == "PRES":
-                                        value = round(value * 0.02953, 2)
-                                        attributes["raw_value"] = str(original_value)
-                                        attributes["unit"] = "hPa"
-
-                                # Add direction cardinal for direction measurements
-                                if header in ["WDIR", "MWD"]:  # Direction sensors
-                                    cardinal = degrees_to_cardinal(value)
-                                    if cardinal:
-                                        attributes["direction_cardinal"] = cardinal
-
-                                result[sensor_id] = {
-                                    "state": value,
-                                    "attributes": attributes,
-                                }
-                        except (ValueError, IndexError):
-                            _LOGGER.debug(
-                                "Buoy %s: Invalid data for sensor %s: %s",
-                                self.station_id,
-                                sensor_id,
-                                data[i] if i < len(data) else "missing",
-                            )
-                            continue
-
-                return result
-
-        except Exception as err:
-            api_error = await handle_ndbc_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NDBC Buoy %s: Error fetching NDBC meteorological data: %s. Technical details: %s",
-                self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
-            return {}
-
-    async def _fetch_ndbc_spectral_wave(self) -> dict[str, Any]:
-        """Fetch spectral wave data from NDBC."""
-        try:
-            url = const.NDBC_SPEC_URL.format(buoy_id=self.station_id)
-            async with self.session.get(url) as response:
-                if response.status != 200:
-                    _LOGGER.error(
-                        "NDBC Buoy %s: Error fetching spectral wave data. Status: %s",
-                        self.station_id,
-                        response.status,
-                    )
-                    return {}
-
-                text = await response.text()
-                lines = text.strip().split("\n")
-
-                if len(lines) < 3:  # Need header, units, and at least one data line
-                    _LOGGER.warning(
-                        "NDBC Buoy %s: Insufficient data in spectral wave response",
-                        self.station_id,
-                    )
-                    return {}
-
-                headers = lines[0].strip().split()
-                units = lines[1].strip().split()  # Units line
-                data = lines[2].strip().split()  # Most recent data line
-
-                result = {}
-                for i, header in enumerate(headers):
-                    sensor_id = f"spec_wave_{header.lower()}"
-                    if sensor_id not in self.selected_sensors:
-                        continue
-
-                    try:
-                        if i < len(data) and data[i] not in [
-                            "MM",
-                            "999",
-                            "999.0",
-                            "",
-                            "N/A",
-                        ]:
-                            # Round initial value to 2 decimal places
-                            value = round(float(data[i]), 2)
-
-                            # Convert values if imperial units are requested
-                            if self.unit_system == const.UNIT_IMPERIAL:
-                                # Wave height conversions (WVHT, SwH, WWH) - meters to feet
-                                if header in ["WVHT", "SwH", "WWH"]:
-                                    value = round(value * 3.28084, 2)
-
-                            # Initialize empty attributes dictionary
-                            attributes = {}
-
-                            # Add attributes based on sensor type
-                            if header in ["SwD", "WWD", "MWD"]:  # Direction sensors
-                                cardinal = degrees_to_cardinal(value)
-                                if cardinal:
-                                    attributes["direction_cardinal"] = cardinal
-                            elif header in ["WVHT", "SwH", "WWH"]:
-                                # Store the original (unconverted) value and unit
-                                attributes["raw_value"] = str(round(float(data[i]), 2))
-                                attributes["unit"] = (
-                                    units[i] if i < len(units) else None
-                                )
-
-                            result[sensor_id] = {
-                                "state": value,
-                                "attributes": attributes,
-                            }
-                    except (ValueError, IndexError):
-                        _LOGGER.debug(
-                            "NDBC Buoy %s: Invalid data for sensor %s: %s",
-                            self.station_id,
-                            sensor_id,
-                            data[i] if i < len(data) else "missing",
-                        )
-                        continue
-
-                _LOGGER.debug(
-                    "NDBC Buoy %s: Spectral wave sensors processed: %s",
-                    self.station_id,
-                    list(result.keys()),
-                )
-                return result
-
-        except Exception as err:
-            api_error = await handle_ndbc_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NDBC Buoy %s: Error processing spectral wave data: %s. Technical details: %s",
-                self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
-            return {}
-
-    async def _fetch_ndbc_ocean_current(self) -> dict[str, Any]:
-        """Fetch ocean current data from NDBC.
-
-        Not all NDBC buoys have current sensors, so handle 404 errors gracefully.
+        Args:
+            sensor_data: The sensor data to check
 
         Returns:
-            dict[str, Any]: Dictionary containing ocean current sensor data if available
+            bool: True if the sensor has valid state data
         """
-        try:
-            session = async_get_clientsession(self.hass)
-            url = const.NDBC_CURRENT_URL.format(buoy_id=self.station_id)
+        if not sensor_data:
+            return False
 
-            async with session.get(url) as response:
-                if response.status == 404:
-                    _LOGGER.debug(
-                        "NDBC Buoy %s: Ocean current data not available - this is normal as not all buoys have current sensors",
-                        self.station_id,
-                    )
-                    return {}
+        # Check both dictionary format and direct state attributes
+        if isinstance(sensor_data, dict):
+            return "state" in sensor_data and sensor_data["state"] is not None
 
-                if response.status != 200:
-                    _LOGGER.error(
-                        "NDBC Buoy %s: Error fetching ocean current data. Status: %s",
-                        self.station_id,
-                        response.status,
-                    )
-                    return {}
-
-                text = await response.text()
-                lines = text.strip().split("\n")
-
-                if len(lines) < 2:  # Need header and at least one data line
-                    _LOGGER.debug(
-                        "NDBC Buoy %s: Insufficient ocean current data in response",
-                        self.station_id,
-                    )
-                    return {}
-
-                headers = lines[0].strip().split()
-                # Get recent data lines for validation
-                data_lines = [line.strip().split() for line in lines[1:6]]
-
-                result = {}
-                for i, header in enumerate(headers):
-                    # Create sensor_id in the same format as utils.py discovery
-                    sensor_id = f"current_{header.lower()}"
-                    if sensor_id not in self.selected_sensors:
-                        continue
-
-                    # Validate sensor data across recent readings
-                    valid_readings = False
-                    latest_value = None
-
-                    for data_line in data_lines:
-                        try:
-                            if (
-                                i < len(data_line)
-                                and data_line[i]
-                                not in ["MM", "999", "999.0", "", "N/A"]
-                                and float(data_line[i])
-                            ):
-                                valid_readings = True
-                                if latest_value is None:  # Store first valid reading
-                                    latest_value = float(data_line[i])
-                                break
-                        except (ValueError, IndexError):
-                            continue
-
-                    if valid_readings and latest_value is not None:
-                        # Initialize empty attributes dictionary
-                        attributes = {}
-
-                        # Add attributes based on sensor type
-                        if header == "DRCT":  # Direction sensors
-                            attributes["direction_cardinal"] = degrees_to_cardinal(
-                                latest_value
-                            )
-                        elif header in ["DEPTH", "SPDD"]:  # Measurement sensors
-                            attributes["raw_value"] = str(latest_value)
-                            attributes["units"] = (
-                                "meters" if header == "DEPTH" else "m/s"
-                            )
-
-                        result[sensor_id] = {
-                            "state": latest_value,
-                            "attributes": attributes,
-                        }
-
-                _LOGGER.debug(
-                    "NDBC Buoy %s: Ocean current sensors processed: %s",
-                    self.station_id,
-                    list(result.keys()),
-                )
-                return result
-
-        except Exception as err:
-            _LOGGER.error(
-                "NDBC Buoy %s: Error processing ocean current data: %s",
-                self.station_id,
-                err,
-            )
-            return {}
+        # If it has a state attribute directly
+        return hasattr(sensor_data, "state") and sensor_data.state is not None
