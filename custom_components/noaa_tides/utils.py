@@ -1,4 +1,4 @@
-"""Utility functions for the NOAA Tides integration."""
+"""Utility functions for the NOAA Tides Extended integration."""
 
 from __future__ import annotations
 
