@@ -1,4 +1,4 @@
-"""Config flow for NOAA Tides integration."""
+"""Config flow for NOAA Tides Extended integration."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
-    """Handle a config flow for NOAA Tides integration."""
+    """Handle a config flow for NOAA Tides Extended integration."""
 
     VERSION: Final = 1
 
@@ -228,7 +228,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
 
 
 class NoaaTidesOptionsFlow(config_entries.OptionsFlow):
-    """Handle options for the NOAA Tides integration."""
+    """Handle options for the NOAA Tides Extended integration."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
