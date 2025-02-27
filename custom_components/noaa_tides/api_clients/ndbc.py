@@ -29,7 +29,11 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 
 class NdbcApiClient(BaseApiClient):
-    """API client for NDBC data sources."""
+    """API client for NDBC data sources.
+
+    Handles fetching data from NDBC APIs with appropriate error handling
+    and data processing for each endpoint.
+    """
 
     def __init__(
         self,
