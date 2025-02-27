@@ -1,4 +1,4 @@
-"""The NOAA Tides integration."""
+"""The NOAA Tides Extended integration."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ PLATFORMS: Final[list[Platform]] = [Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up NOAA Tides from a config entry.
+    """Set up NOAA Tides Extended from a config entry.
 
     Args:
         hass: The HomeAssistant instance
@@ -72,7 +72,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Update options for the NOAA Tides integration.
+    """Update options for the NOAA Tides Extended integration.
 
     Args:
         hass: The HomeAssistant instance
