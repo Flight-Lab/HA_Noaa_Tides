@@ -1,4 +1,4 @@
-"""Constants for the NOAA Tides integration."""
+"""Constants for the NOAA Tides Extended integration."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Final
 from .types import DataSectionType, TimezoneType, UnitSystemType
 
 # Domain and Platform Configuration
-DOMAIN: Final = "noaa_tides"
+DOMAIN: Final = "noaa_tides_extended"
 PLATFORMS: Final[list[str]] = ["sensor"]
 
 # Hub Types
