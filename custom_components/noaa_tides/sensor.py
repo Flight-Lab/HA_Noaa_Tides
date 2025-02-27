@@ -1,4 +1,4 @@
-"""Sensor platform for NOAA Tides integration."""
+"""Sensor platform for NOAA Tides Extended integration."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> bool:
-    """Set up NOAA Tides sensors based on a config entry."""
+    """Set up NOAA Tides Extended sensors based on a config entry."""
     coordinator: NoaaTidesDataUpdateCoordinator = hass.data[const.DOMAIN][
         entry.entry_id
     ]
@@ -85,7 +85,7 @@ async def async_setup_entry(
 
 
 class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorEntity):
-    """Representation of a NOAA Tides sensor."""
+    """Representation of a NOAA Tides Extended sensor."""
 
     entity_description: NoaaTidesSensorEntityDescription
     _attr_has_entity_name = True
