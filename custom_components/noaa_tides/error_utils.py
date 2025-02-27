@@ -1,4 +1,4 @@
-"""Error handling utilities for the NOAA Tides integration.
+"""Error handling utilities for the NOAA Tides Extended integration.
 
 This module provides utility functions for handling errors, converting
 standard exceptions to typed API exceptions, and generating user-friendly
@@ -152,7 +152,7 @@ def map_exception_to_error(
     """Map a generic exception to a more specific error type.
 
     Converts standard Python exceptions to the appropriate
-    NOAA Tides typed exceptions based on the exception type.
+    NOAA Tides Extended typed exceptions based on the exception type.
 
     Args:
         exception: The original exception
