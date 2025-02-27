@@ -19,7 +19,13 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 
 class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
-    """Class to manage fetching NOAA Tides data."""
+    """Class to manage fetching NOAA Tides data.
+
+    Error handling strategy:
+    - Tracks consecutive failures to provide better error messages
+    - Falls back to cached data for transient errors when possible
+    - Raises UpdateFailed with user-friendly messages for UI display
+    """
 
     def __init__(
         self,
@@ -77,11 +83,17 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch data from NOAA/NDBC APIs.
 
+        Handles various error conditions:
+        - Connection timeouts (retries with backoff)
+        - API errors (converts to user-friendly messages)
+        - Data validation errors (logs details for debugging)
+        - Server errors (uses cached data if available)
+
         Returns:
             CoordinatorData: The fetched data
 
         Raises:
-            UpdateFailed: If there's an error fetching data
+            UpdateFailed: If there's an error fetching data after retries
         """
         source_type = (
             "NOAA station" if self.hub_type == const.HUB_TYPE_NOAA else "NDBC buoy"
@@ -292,6 +304,8 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     def _get_missing_sensors(self, data: CoordinatorData) -> list[str]:
         """Identify selected sensors that are missing from the data.
+
+        Used to track partial failures when some sensors don't return data.
 
         Args:
             data: The data returned from the API
