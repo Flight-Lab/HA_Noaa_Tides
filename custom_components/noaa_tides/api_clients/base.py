@@ -23,7 +23,17 @@ T = TypeVar("T")  # Generic type for return values
 
 
 class BaseApiClient:
-    """Base API client for NOAA and NDBC data sources."""
+    """Base API client for NOAA and NDBC data sources.
+
+    Provides common functionality for making API requests with
+    consistent error handling, logging, and retry logic.
+
+    Error handling strategy:
+    - Use _safe_request methods to make API calls with error handling
+    - Convert standard exceptions to typed API exceptions
+    - Provide user-friendly error messages for end users
+    - Log detailed technical information for debugging
+    """
 
     def __init__(
         self,
@@ -64,7 +74,7 @@ class BaseApiClient:
     async def handle_error(
         self, error: Exception, operation: str = "API call"
     ) -> ApiError:
-        """Handle API errors.
+        """Handle API errors and convert to structured ApiError objects.
 
         Args:
             error: The exception that occurred
@@ -91,7 +101,7 @@ class BaseApiClient:
         )
 
     def _log_error(self, error: ApiError) -> None:
-        """Log an API error.
+        """Log an API error with appropriate level and format.
 
         Args:
             error: The API error to log
@@ -112,6 +122,10 @@ class BaseApiClient:
         self, url: str, params: dict[str, Any] = None, timeout: int = DEFAULT_TIMEOUT
     ) -> dict[str, Any]:
         """Make a safe request to the API with error handling.
+
+        Automatically retries on connection errors and timeouts
+        with exponential backoff. Won't retry HTTP errors except
+        for rate limits (429).
 
         Args:
             url: The URL to request
@@ -320,4 +334,3 @@ class BaseApiClient:
                 raise UpdateFailed(
                     f"{api_error.message} ({operation_with_endpoint})"
                 ) from err
-
