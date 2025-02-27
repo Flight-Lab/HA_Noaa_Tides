@@ -1,4 +1,4 @@
-"""Data update coordinator for the NOAA Tides integration."""
+"""Data update coordinator for the NOAA Tides Extended integration."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 
 class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
-    """Class to manage fetching NOAA Tides data.
+    """Class to manage fetching NOAA Tides Extended data.
 
     Error handling strategy:
     - Tracks consecutive failures to provide better error messages
