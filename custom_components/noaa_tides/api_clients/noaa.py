@@ -3,54 +3,63 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import logging
 import math
-from datetime import datetime
 from typing import Any, Final
 
-import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from ..types import ApiError, CoordinatorData, SensorData
 from ..const import (
-    NOAA_DATA_URL,
-    UNIT_METRIC,
-    UNIT_IMPERIAL,
-    ATTR_NEXT_TIDE_TYPE,
-    ATTR_NEXT_TIDE_TIME,
-    ATTR_NEXT_TIDE_LEVEL,
-    ATTR_FOLLOWING_TIDE_TYPE,
-    ATTR_FOLLOWING_TIDE_TIME,
-    ATTR_FOLLOWING_TIDE_LEVEL,
-    ATTR_LAST_TIDE_TYPE,
-    ATTR_LAST_TIDE_TIME,
-    ATTR_LAST_TIDE_LEVEL,
-    ATTR_TIDE_FACTOR,
-    ATTR_TIDE_PERCENTAGE,
     ATTR_CURRENTS_DIRECTION,
     ATTR_CURRENTS_SPEED,
     ATTR_CURRENTS_TIME,
+    ATTR_FOLLOWING_TIDE_LEVEL,
+    ATTR_FOLLOWING_TIDE_TIME,
+    ATTR_FOLLOWING_TIDE_TYPE,
+    ATTR_LAST_TIDE_LEVEL,
+    ATTR_LAST_TIDE_TIME,
+    ATTR_LAST_TIDE_TYPE,
+    ATTR_NEXT_TIDE_LEVEL,
+    ATTR_NEXT_TIDE_TIME,
+    ATTR_NEXT_TIDE_TYPE,
+    ATTR_TIDE_FACTOR,
+    ATTR_TIDE_PERCENTAGE,
+    NOAA_DATA_URL,
+    UNIT_IMPERIAL,
+    UNIT_METRIC,
 )
-from ..utils import handle_noaa_api_error
+from ..types import CoordinatorData
 from .base import BaseApiClient
 
 _LOGGER: Final = logging.getLogger(__name__)
 
 
 class NoaaApiClient(BaseApiClient):
-    """API client for NOAA data sources."""
+    """API client for NOAA data sources.
 
-    async def handle_error(self, error: Exception) -> ApiError:
-        """Handle NOAA API errors and return user-friendly messages.
+    Handles fetching data from NOAA APIs with appropriate error handling
+    and data processing for each endpoint.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        station_id: str,
+        timezone: str,
+        unit_system: str,
+    ) -> None:
+        """Initialize the NOAA API client.
 
         Args:
-            error: The exception that occurred
-
-        Returns:
-            ApiError: A structured error object with user-friendly messages
+            hass: The Home Assistant instance
+            station_id: The station ID
+            timezone: The timezone setting
+            unit_system: The unit system to use
         """
-        return await handle_noaa_api_error(error, self.station_id)
+        super().__init__(hass, station_id, timezone, unit_system)
+        self._is_noaa = True
 
     async def fetch_data(self, selected_sensors: list[str]) -> CoordinatorData:
         """Fetch data from NOAA API for selected sensors.
@@ -108,21 +117,17 @@ class NoaaApiClient(BaseApiClient):
                         data.update(sensor_data)
                 except Exception as err:
                     _LOGGER.error(
-                        "NOAA Station %s: Error processing sensor data: %s",
+                        "NOAA Station %s: Error processing sensor data: %s (%s)",
                         self.station_id,
-                        err,
+                        str(err),
+                        type(err).__name__,
                     )
 
             return data
 
         except Exception as err:
             api_error = await self.handle_error(err)
-            _LOGGER.error(
-                "NOAA Station %s: Error fetching data: %s. Technical details: %s",
-                self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
-            )
+            self._log_error(api_error)
             raise UpdateFailed(api_error.message)
 
     async def _fetch_tide_predictions(self) -> dict[str, Any]:
@@ -144,117 +149,108 @@ class NoaaApiClient(BaseApiClient):
         }
 
         try:
-            async with self.session.get(NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    error_msg = f"NOAA Station {self.station_id}: Error fetching tide predictions"
-                    _LOGGER.error("%s: HTTP %s", error_msg, response.status)
-                    raise UpdateFailed(error_msg)
+            data = await self._safe_request_with_retry(
+                NOAA_DATA_URL, params=params, operation="fetching tide predictions"
+            )
+            predictions = data.get("predictions", [])
 
-                data = await response.json()
-                predictions = data.get("predictions", [])
+            if not predictions:
+                return {}
 
-                if not predictions:
-                    return {}
+            now = datetime.now()
 
-                now = datetime.now()
-
-                # Convert predictions to datetime objects
-                formatted_predictions = []
-                for pred in predictions:
-                    pred_time = datetime.strptime(pred.get("t", ""), "%Y-%m-%d %H:%M")
-                    formatted_predictions.append(
-                        {
-                            "time": pred_time,
-                            "type": pred.get("type", ""),
-                            "level": float(pred.get("v", 0)),
-                        }
-                    )
-
-                # Sort predictions by time
-                formatted_predictions.sort(key=lambda x: x["time"])
-
-                # Find last tide and next tide
-                last_tide = None
-                next_tide = None
-                following_tide = None
-
-                for pred in formatted_predictions:
-                    if pred["time"] <= now:
-                        last_tide = pred
-                    elif next_tide is None:
-                        next_tide = pred
-                    elif following_tide is None:
-                        following_tide = pred
-                        break
-
-                if not (last_tide and next_tide):
-                    return {}
-
-                # Calculate tide factor and percentage
-                predicted_period = (
-                    next_tide["time"] - last_tide["time"]
-                ).total_seconds()
-                elapsed_time = (now - last_tide["time"]).total_seconds()
-
-                if elapsed_time < 0 or elapsed_time > predicted_period:
-                    return {}
-
-                if next_tide["type"] == "H":
-                    tide_factor = 50 - (
-                        50 * math.cos(elapsed_time * math.pi / predicted_period)
-                    )
-                else:
-                    tide_factor = 50 + (
-                        50 * math.cos(elapsed_time * math.pi / predicted_period)
-                    )
-
-                tide_percentage = (elapsed_time / predicted_period) * 50
-                if next_tide["type"] == "H":
-                    tide_percentage += 50
-
-                # Format the tide state to show next tide and time
-                next_tide_type = "High" if next_tide["type"] == "H" else "Low"
-                next_tide_time = next_tide["time"].strftime("%-I:%M %p")
-                tide_state = f"{next_tide_type} tide at {next_tide_time}"
-
-                return {
-                    "tide_predictions": {
-                        "state": tide_state,
-                        "attributes": {
-                            ATTR_NEXT_TIDE_TYPE: "High"
-                            if next_tide["type"] == "H"
-                            else "Low",
-                            ATTR_NEXT_TIDE_TIME: next_tide["time"].strftime(
-                                "%-I:%M %p"
-                            ),
-                            ATTR_NEXT_TIDE_LEVEL: next_tide["level"],
-                            ATTR_FOLLOWING_TIDE_TYPE: "High"
-                            if following_tide["type"] == "H"
-                            else "Low",
-                            ATTR_FOLLOWING_TIDE_TIME: following_tide["time"].strftime(
-                                "%-I:%M %p"
-                            ),
-                            ATTR_FOLLOWING_TIDE_LEVEL: following_tide["level"],
-                            ATTR_LAST_TIDE_TYPE: "High"
-                            if last_tide["type"] == "H"
-                            else "Low",
-                            ATTR_LAST_TIDE_TIME: last_tide["time"].strftime(
-                                "%-I:%M %p"
-                            ),
-                            ATTR_LAST_TIDE_LEVEL: last_tide["level"],
-                            ATTR_TIDE_FACTOR: round(tide_factor, 2),
-                            ATTR_TIDE_PERCENTAGE: round(tide_percentage, 2),
-                        },
+            # Convert predictions to datetime objects
+            formatted_predictions = []
+            for pred in predictions:
+                pred_time = datetime.strptime(pred.get("t", ""), "%Y-%m-%d %H:%M")
+                formatted_predictions.append(
+                    {
+                        "time": pred_time,
+                        "type": pred.get("type", ""),
+                        "level": float(pred.get("v", 0)),
                     }
-                }
+                )
 
+            # Sort predictions by time
+            formatted_predictions.sort(key=lambda x: x["time"])
+
+            # Find last tide and next tide
+            last_tide = None
+            next_tide = None
+            following_tide = None
+
+            for pred in formatted_predictions:
+                if pred["time"] <= now:
+                    last_tide = pred
+                elif next_tide is None:
+                    next_tide = pred
+                elif following_tide is None:
+                    following_tide = pred
+                    break
+
+            if not (last_tide and next_tide):
+                return {}
+
+            # Calculate tide factor and percentage
+            predicted_period = (next_tide["time"] - last_tide["time"]).total_seconds()
+            elapsed_time = (now - last_tide["time"]).total_seconds()
+
+            if elapsed_time < 0 or elapsed_time > predicted_period:
+                return {}
+
+            if next_tide["type"] == "H":
+                tide_factor = 50 - (
+                    50 * math.cos(elapsed_time * math.pi / predicted_period)
+                )
+            else:
+                tide_factor = 50 + (
+                    50 * math.cos(elapsed_time * math.pi / predicted_period)
+                )
+
+            tide_percentage = (elapsed_time / predicted_period) * 50
+            if next_tide["type"] == "H":
+                tide_percentage += 50
+
+            # Format the tide state to show next tide and time
+            next_tide_type = "High" if next_tide["type"] == "H" else "Low"
+            next_tide_time = next_tide["time"].strftime("%-I:%M %p")
+            tide_state = f"{next_tide_type} tide at {next_tide_time}"
+
+            return {
+                "tide_predictions": {
+                    "state": tide_state,
+                    "attributes": {
+                        ATTR_NEXT_TIDE_TYPE: "High"
+                        if next_tide["type"] == "H"
+                        else "Low",
+                        ATTR_NEXT_TIDE_TIME: next_tide["time"].strftime("%-I:%M %p"),
+                        ATTR_NEXT_TIDE_LEVEL: next_tide["level"],
+                        ATTR_FOLLOWING_TIDE_TYPE: "High"
+                        if following_tide["type"] == "H"
+                        else "Low",
+                        ATTR_FOLLOWING_TIDE_TIME: following_tide["time"].strftime(
+                            "%-I:%M %p"
+                        ),
+                        ATTR_FOLLOWING_TIDE_LEVEL: following_tide["level"],
+                        ATTR_LAST_TIDE_TYPE: "High"
+                        if last_tide["type"] == "H"
+                        else "Low",
+                        ATTR_LAST_TIDE_TIME: last_tide["time"].strftime("%-I:%M %p"),
+                        ATTR_LAST_TIDE_LEVEL: last_tide["level"],
+                        ATTR_TIDE_FACTOR: round(tide_factor, 2),
+                        ATTR_TIDE_PERCENTAGE: round(tide_percentage, 2),
+                    },
+                }
+            }
+
+        except UpdateFailed:
+            return {}
         except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
             _LOGGER.error(
-                "NOAA Station %s: Error calculating tide predictions: %s. Technical details: %s",
+                "NOAA Station %s: Error calculating tide predictions: %s (%s)",
                 self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
+                str(err),
+                type(err).__name__,
             )
             return {}
 
@@ -290,54 +286,50 @@ class NoaaApiClient(BaseApiClient):
                 },  # Exclude format for cleaner logs
             )
 
-            async with self.session.get(NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    _LOGGER.error(
-                        "NOAA Station %s: Error fetching %s data. Status: %s",
-                        self.station_id,
-                        sensor_type,
-                        response.status,
-                    )
-                    return {}
+            data = await self._safe_request_with_retry(
+                NOAA_DATA_URL, params=params, operation=f"fetching {sensor_type} data"
+            )
 
-                data = await response.json()
+            if not data.get("data"):
+                _LOGGER.debug(
+                    "NOAA Station %s: No data returned for %s. Response: %s",
+                    self.station_id,
+                    sensor_type,
+                    data,
+                )
+                return {}
 
-                if not data.get("data"):
-                    _LOGGER.error(
-                        "NOAA Station %s: No data returned for %s. Response: %s",
-                        self.station_id,
-                        sensor_type,
-                        data,
-                    )
-                    return {}
+            latest = data["data"][0]
 
-                latest = data["data"][0]
+            # Only log the latest data point for water level at debug level
+            if sensor_type == "water_level":
+                _LOGGER.debug(
+                    "NOAA Station %s: Latest water level reading - Value: %s %s, Time: %s, Datum: MLLW",
+                    self.station_id,
+                    latest.get("v", "N/A"),
+                    "meters" if self.unit_system == UNIT_METRIC else "feet",
+                    latest.get("t", "N/A"),
+                )
 
-                # Only log the latest data point for water level at debug level
-                if sensor_type == "water_level":
-                    _LOGGER.debug(
-                        "NOAA Station %s: Latest water level reading - Value: %s %s, Time: %s, Datum: MLLW",
-                        self.station_id,
-                        latest.get("v", "N/A"),
-                        "meters" if self.unit_system == UNIT_METRIC else "feet",
-                        latest.get("t", "N/A"),
-                    )
-
-                return {
-                    sensor_type: {
-                        "state": float(latest.get("v", 0)),
-                        "attributes": {
-                            "time": latest.get("t"),
-                            "datum": "MLLW",  # Add datum to attributes
-                        },
-                    }
+            return {
+                sensor_type: {
+                    "state": float(latest.get("v", 0)),
+                    "attributes": {
+                        "time": latest.get("t"),
+                        "datum": "MLLW",  # Add datum to attributes
+                    },
                 }
+            }
+
+        except UpdateFailed:
+            return {}
         except Exception as err:
             _LOGGER.error(
-                "NOAA Station %s: Error fetching sensor data for %s: %s",
+                "NOAA Station %s: Error fetching sensor data for %s: %s (%s)",
                 self.station_id,
                 sensor_type,
-                err,
+                str(err),
+                type(err).__name__,
             )
             return {}
 
@@ -362,96 +354,93 @@ class NoaaApiClient(BaseApiClient):
         }
 
         try:
-            async with self.session.get(NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    raise UpdateFailed(
-                        f"{self.station_id}: Error fetching currents predictions: {response.status}"
-                    )
+            data = await self._safe_request_with_retry(
+                NOAA_DATA_URL, params=params, operation="fetching currents predictions"
+            )
 
-                data = await response.json()
+            # Get the predictions array
+            predictions = data.get("current_predictions", {}).get("cp", [])
 
-                # Get the predictions array
-                predictions = data.get("current_predictions", {}).get("cp", [])
-
-                if not predictions:
-                    _LOGGER.debug(
-                        "NOAA Station %s: No currents predictions data available",
-                        self.station_id,
-                    )
-                    return {}
-
-                # Get the most recent prediction
-                latest = predictions[0]
-
-                # Log only relevant fields from the latest prediction
+            if not predictions:
                 _LOGGER.debug(
-                    "NOAA Station %s: Latest currents prediction - Time: %s, Velocity: %s, Type: %s, "
-                    "Flood Dir: %s, Ebb Dir: %s",
+                    "NOAA Station %s: No currents predictions data available",
                     self.station_id,
-                    latest.get("Time", "N/A"),
-                    latest.get("Velocity_Major", "N/A"),
-                    latest.get("Type", "N/A"),
-                    latest.get("meanFloodDir", "N/A"),
-                    latest.get("meanEbbDir", "N/A"),
                 )
+                return {}
 
-                # Extract common values
-                time = latest.get("Time", "")
-                velocity = float(latest.get("Velocity_Major", 0))
+            # Get the most recent prediction
+            latest = predictions[0]
 
-                # First check for explicit Type field (Structure A)
-                type_value = latest.get("Type", "").lower()
-
-                # If no explicit type, infer from velocity (Structure B)
-                if not type_value:
-                    if abs(velocity) <= 0.1:  # Define slack water threshold
-                        type_value = "slack"
-                    elif velocity > 0:
-                        type_value = "flood"
-                    else:
-                        type_value = "ebb"
-
-                # Get appropriate direction based on current type
-                direction = float(
-                    latest.get("meanFloodDir", 0)
-                    if type_value == "flood"
-                    else latest.get("meanEbbDir", 0)
-                    if type_value == "ebb"
-                    else 0  # Use 0 for slack water
-                )
-
-                return_data = {
-                    "currents_predictions": {
-                        "state": type_value,
-                        "attributes": {
-                            ATTR_CURRENTS_DIRECTION: direction,
-                            ATTR_CURRENTS_SPEED: abs(velocity),
-                            ATTR_CURRENTS_TIME: time,
-                        },
-                    }
-                }
-
-                # Log the processed and structured return data
-                _LOGGER.debug(
-                    "NOAA Station %s: Processed currents prediction - State: %s, Direction: %.1f°, "
-                    "Speed: %.2f %s, Time: %s",
-                    self.station_id,
-                    type_value,
-                    direction,
-                    abs(velocity),
-                    "m/s" if self.unit_system == UNIT_METRIC else "knots",
-                    time,
-                )
-
-                return return_data
-
-        except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NOAA Station %s: Error fetching currents predictions: %s. Technical details: %s",
+            # Log only relevant fields from the latest prediction
+            _LOGGER.debug(
+                "NOAA Station %s: Latest currents prediction - Time: %s, Velocity: %s, Type: %s, "
+                "Flood Dir: %s, Ebb Dir: %s",
                 self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
+                latest.get("Time", "N/A"),
+                latest.get("Velocity_Major", "N/A"),
+                latest.get("Type", "N/A"),
+                latest.get("meanFloodDir", "N/A"),
+                latest.get("meanEbbDir", "N/A"),
+            )
+
+            # Extract common values
+            time = latest.get("Time", "")
+            velocity = float(latest.get("Velocity_Major", 0))
+
+            # First check for explicit Type field (Structure A)
+            type_value = latest.get("Type", "").lower()
+
+            # If no explicit type, infer from velocity (Structure B)
+            if not type_value:
+                if abs(velocity) <= 0.1:  # Define slack water threshold
+                    type_value = "slack"
+                elif velocity > 0:
+                    type_value = "flood"
+                else:
+                    type_value = "ebb"
+
+            # Get appropriate direction based on current type
+            direction = float(
+                latest.get("meanFloodDir", 0)
+                if type_value == "flood"
+                else latest.get("meanEbbDir", 0)
+                if type_value == "ebb"
+                else 0  # Use 0 for slack water
+            )
+
+            return_data = {
+                "currents_predictions": {
+                    "state": type_value,
+                    "attributes": {
+                        ATTR_CURRENTS_DIRECTION: direction,
+                        ATTR_CURRENTS_SPEED: abs(velocity),
+                        ATTR_CURRENTS_TIME: time,
+                    },
+                }
+            }
+
+            # Log the processed and structured return data
+            _LOGGER.debug(
+                "NOAA Station %s: Processed currents prediction - State: %s, Direction: %.1f°, "
+                "Speed: %.2f %s, Time: %s",
+                self.station_id,
+                type_value,
+                direction,
+                abs(velocity),
+                "m/s" if self.unit_system == UNIT_METRIC else "knots",
+                time,
+            )
+
+            return return_data
+
+        except UpdateFailed:
+            return {}
+        except Exception as err:
+            _LOGGER.error(
+                "NOAA Station %s: Error fetching currents predictions: %s (%s)",
+                self.station_id,
+                str(err),
+                type(err).__name__,
             )
             return {}
 
@@ -471,50 +460,42 @@ class NoaaApiClient(BaseApiClient):
         }
 
         try:
-            async with self.session.get(NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    _LOGGER.error(
-                        "NOAA Station %s: Error fetching currents data. Status: %s",
-                        self.station_id,
-                        response.status,
-                    )
-                    return {}
+            data = await self._safe_request_with_retry(
+                NOAA_DATA_URL, params=params, operation="fetching currents data"
+            )
+            if not data.get("data"):
+                return {}
 
-                data = await response.json()
-                if not data.get("data"):
-                    return {}
+            latest = data["data"][0]
+            speed = float(latest.get("s", 0))
+            direction = float(latest.get("d", 0))
 
-                latest = data["data"][0]
-                speed = float(latest.get("s", 0))
-                direction = float(latest.get("d", 0))
-
-                return {
-                    "currents_speed": {
-                        "state": speed,
-                        "attributes": {
-                            "direction": direction,
-                            "time": latest.get("t"),
-                            "units": "m/s"
-                            if self.unit_system == UNIT_METRIC
-                            else "knots",
-                        },
+            return {
+                "currents_speed": {
+                    "state": speed,
+                    "attributes": {
+                        "direction": direction,
+                        "time": latest.get("t"),
+                        "units": "m/s" if self.unit_system == UNIT_METRIC else "knots",
                     },
-                    "currents_direction": {
-                        "state": direction,
-                        "attributes": {
-                            "speed": speed,
-                            "time": latest.get("t"),
-                        },
+                },
+                "currents_direction": {
+                    "state": direction,
+                    "attributes": {
+                        "speed": speed,
+                        "time": latest.get("t"),
                     },
-                }
+                },
+            }
 
+        except UpdateFailed:
+            return {}
         except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
             _LOGGER.error(
-                "NOAA Station %s: Error fetching currents data: %s. Technical details: %s",
+                "NOAA Station %s: Error fetching currents data: %s (%s)",
                 self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
+                str(err),
+                type(err).__name__,
             )
             return {}
 
@@ -536,55 +517,49 @@ class NoaaApiClient(BaseApiClient):
         }
 
         try:
-            async with self.session.get(NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    _LOGGER.error(
-                        "NOAA Station %s: Error fetching wind data. Status: %s",
-                        self.station_id,
-                        response.status,
-                    )
-                    return {}
+            data = await self._safe_request_with_retry(
+                NOAA_DATA_URL, params=params, operation="fetching wind data"
+            )
+            if not data.get("data"):
+                return {}
 
-                data = await response.json()
-                if not data.get("data"):
-                    return {}
+            latest = data["data"][0]
+            speed = float(latest.get("s", 0))
+            direction = float(latest.get("d", 0))
+            gust = latest.get("g")
+            direction_cardinal = latest.get("dr", "")
 
-                latest = data["data"][0]
-                speed = float(latest.get("s", 0))
-                direction = float(latest.get("d", 0))
-                gust = latest.get("g")
-                direction_cardinal = latest.get("dr", "")
-
-                return {
-                    "wind_speed": {
-                        "state": speed,
-                        "attributes": {
-                            "direction": direction,
-                            "direction_cardinal": direction_cardinal,
-                            "gust": float(gust) if gust else None,
-                            "time": latest.get("t"),
-                            "flags": latest.get("f"),
-                        },
+            return {
+                "wind_speed": {
+                    "state": speed,
+                    "attributes": {
+                        "direction": direction,
+                        "direction_cardinal": direction_cardinal,
+                        "gust": float(gust) if gust else None,
+                        "time": latest.get("t"),
+                        "flags": latest.get("f"),
                     },
-                    "wind_direction": {
-                        "state": direction,
-                        "attributes": {
-                            "direction_cardinal": direction_cardinal,
-                            "speed": speed,
-                            "gust": float(gust) if gust else None,
-                            "time": latest.get("t"),
-                            "flags": latest.get("f"),
-                        },
+                },
+                "wind_direction": {
+                    "state": direction,
+                    "attributes": {
+                        "direction_cardinal": direction_cardinal,
+                        "speed": speed,
+                        "gust": float(gust) if gust else None,
+                        "time": latest.get("t"),
+                        "flags": latest.get("f"),
                     },
-                }
+                },
+            }
 
+        except UpdateFailed:
+            return {}
         except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
             _LOGGER.error(
-                "NOAA Station %s: Error fetching wind data: %s. Technical details: %s",
+                "NOAA Station %s: Error fetching wind data: %s (%s)",
                 self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
+                str(err),
+                type(err).__name__,
             )
             return {}
 
@@ -622,56 +597,46 @@ class NoaaApiClient(BaseApiClient):
 
             params["product"] = product_map[sensor_type]
 
-            async with self.session.get(NOAA_DATA_URL, params=params) as response:
-                if response.status != 200:
-                    return {}
-
-                data = await response.json()
-                if not data.get("data"):
-                    return {}
-
-                latest = data["data"][0]
-                value = latest.get("v", None)
-                if value is None:
-                    return {}
-
-                # For all other sensors, return single value
-                return {
-                    sensor_type: {
-                        "state": float(value),
-                        "attributes": {
-                            "time": latest.get("t"),
-                            "flags": latest.get("f"),  # Quality flags if available
-                        },
-                    }
-                }
-
-        except asyncio.TimeoutError as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
-            _LOGGER.error(
-                "NOAA Station %s: Timeout fetching sensor %s: %s. Technical details: %s",
-                self.station_id,
-                sensor_type,
-                api_error.message,
-                api_error.technical_detail or "None",
+            data = await self._safe_request_with_retry(
+                NOAA_DATA_URL, params=params, operation=f"fetching {sensor_type} data"
             )
+            if not data.get("data"):
+                return {}
+
+            latest = data["data"][0]
+            value = latest.get("v", None)
+            if value is None:
+                return {}
+
+            # For all other sensors, return single value
+            return {
+                sensor_type: {
+                    "state": float(value),
+                    "attributes": {
+                        "time": latest.get("t"),
+                        "flags": latest.get("f"),  # Quality flags if available
+                    },
+                }
+            }
+
+        except UpdateFailed:
             return {}
         except ValueError as err:
             # Handle value conversion errors
             _LOGGER.error(
-                "NOAA Station %s: Invalid value received for sensor %s: %s",
+                "NOAA Station %s: Invalid value received for sensor %s: %s (%s)",
                 self.station_id,
                 sensor_type,
-                err,
+                str(err),
+                type(err).__name__,
             )
             return {}
         except Exception as err:
-            api_error = await handle_noaa_api_error(err, self.station_id)
             _LOGGER.error(
-                "NOAA Station %s: Error fetching sensor %s: %s. Technical details: %s",
+                "NOAA Station %s: Error fetching sensor %s: %s (%s)",
                 self.station_id,
                 sensor_type,
-                api_error.message,
-                api_error.technical_detail or "None",
+                str(err),
+                type(err).__name__,
             )
             return {}
