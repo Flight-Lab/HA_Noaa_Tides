@@ -1,6 +1,6 @@
 {
-  "domain": "noaa_tides",
-  "name": "NOAA Tides",
+  "domain": "noaa_tides_extended",
+  "name": "NOAA Tides Extended",
   "codeowners": ["@Flight-Lab"],
   "config_flow": true,
   "dependencies": [],
@@ -8,7 +8,7 @@
   "integration_type": "device",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/Flight-Lab/ha_noaa_tides/issues",
-  "loggers": ["noaa_tides"],
+  "loggers": ["noaa_tides_extended"],
   "requirements": [],
   "version": "0.5.2"
 }
