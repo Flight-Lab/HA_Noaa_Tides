@@ -55,7 +55,7 @@ async def async_setup_entry(
     for sensor_id in coordinator.selected_sensors:
         if sensor_id in sensor_types:
             entities.append(
-                NoaaTidesSensor(
+                NoaaTidesSensorExtended(
                     coordinator=coordinator,
                     description=sensor_types[sensor_id],
                     entry_id=entry.entry_id,
@@ -84,7 +84,9 @@ async def async_setup_entry(
     return True
 
 
-class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorEntity):
+class NoaaTidesSensorExtended(
+    CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorEntity
+):
     """Representation of a NOAA Tides Extended sensor."""
 
     entity_description: NoaaTidesSensorEntityDescription
