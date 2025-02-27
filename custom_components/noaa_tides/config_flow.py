@@ -24,7 +24,7 @@ from .utils import (
 _LOGGER = logging.getLogger(__name__)
 
 
-class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
+class NoaaTidesExtendedConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
     """Handle a config flow for NOAA Tides Extended integration."""
 
     VERSION: Final = 1
@@ -222,12 +222,12 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
     @callback
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
-    ) -> NoaaTidesOptionsFlow:
+    ) -> NoaaTidesExtendedOptionsFlow:
         """Get the options flow for this handler."""
-        return NoaaTidesOptionsFlow(config_entry)
+        return NoaaTidesExtendedOptionsFlow(config_entry)
 
 
-class NoaaTidesOptionsFlow(config_entries.OptionsFlow):
+class NoaaTidesExtendedOptionsFlow(config_entries.OptionsFlow):
     """Handle options for the NOAA Tides Extended integration."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
