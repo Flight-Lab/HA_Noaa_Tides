@@ -31,7 +31,7 @@ from ..const import (
     UNIT_METRIC,
 )
 from ..types import CoordinatorData
-from .base import BaseApiClient
+from .base_api_client import BaseApiClient
 
 _LOGGER: Final = logging.getLogger(__name__)
 
