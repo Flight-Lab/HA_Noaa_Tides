@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 import logging
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from . import const
 from .api_clients import NoaaApiClient, NdbcApiClient
+from .errors import NoaaApiError, NdbcApiError, ApiError
 from .types import CoordinatorData
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -67,6 +68,12 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             update_interval=timedelta(seconds=update_interval),
         )
 
+        # Track consecutive failures for better error reporting
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 3
+        # Track partially failed sensors
+        self._failed_sensors: dict[str, int] = {}
+
     async def _async_update_data(self) -> CoordinatorData:
         """Fetch data from NOAA/NDBC APIs.
 
@@ -76,26 +83,279 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         Raises:
             UpdateFailed: If there's an error fetching data
         """
+        source_type = (
+            "NOAA station" if self.hub_type == const.HUB_TYPE_NOAA else "NDBC buoy"
+        )
+
         try:
+            # Set a timeout for the entire data fetch operation
             async with asyncio.timeout(30):
-                return await self.api_client.fetch_data(self.selected_sensors)
-        except asyncio.TimeoutError as err:
-            api_error = await self.api_client.handle_error(err)
+                # Attempt to fetch data
+                data = await self.api_client.fetch_data(self.selected_sensors)
+
+                # Check if we got any data at all
+                if not data:
+                    self._consecutive_failures += 1
+
+                    # Provide more detailed error after multiple consecutive failures
+                    if self._consecutive_failures >= self._max_consecutive_failures:
+                        raise UpdateFailed(
+                            f"No data available from {source_type} {self.station_id} "
+                            f"after {self._consecutive_failures} attempts. "
+                            f"The service may be experiencing issues."
+                        )
+                    else:
+                        _LOGGER.warning(
+                            "%s %s: No data returned (attempt %d/%d)",
+                            source_type.capitalize(),
+                            self.station_id,
+                            self._consecutive_failures,
+                            self._max_consecutive_failures,
+                        )
+                        # If we have previous data, use it instead of failing completely
+                        if self.data:
+                            _LOGGER.info(
+                                "%s %s: Using cached data for this update",
+                                source_type.capitalize(),
+                                self.station_id,
+                            )
+                            return self.data
+
+                        raise UpdateFailed(
+                            f"No data available from {source_type} {self.station_id}. "
+                            f"Will retry."
+                        )
+
+                # Check for partial failures by identifying missing sensors
+                missing_sensors = self._get_missing_sensors(data)
+
+                if missing_sensors:
+                    # Update failure counts for missing sensors
+                    for sensor in missing_sensors:
+                        self._failed_sensors[sensor] = (
+                            self._failed_sensors.get(sensor, 0) + 1
+                        )
+
+                        # Log at warning level if the sensor has failed multiple times
+                        if (
+                            self._failed_sensors[sensor]
+                            >= self._max_consecutive_failures
+                        ):
+                            _LOGGER.warning(
+                                "%s %s: Sensor '%s' has failed to return data %d times in a row",
+                                source_type.capitalize(),
+                                self.station_id,
+                                sensor,
+                                self._failed_sensors[sensor],
+                            )
+                        else:
+                            _LOGGER.debug(
+                                "%s %s: Sensor '%s' returned no data (attempt %d/%d)",
+                                source_type.capitalize(),
+                                self.station_id,
+                                sensor,
+                                self._failed_sensors[sensor],
+                                self._max_consecutive_failures,
+                            )
+
+                # Reset the consecutive failure counter since we got some data
+                self._consecutive_failures = 0
+
+                # Reset failure counts for sensors that are now working
+                for sensor in list(self._failed_sensors.keys()):
+                    if sensor not in missing_sensors:
+                        del self._failed_sensors[sensor]
+
+                return data
+
+        except asyncio.TimeoutError:
+            self._consecutive_failures += 1
+
             _LOGGER.error(
-                "%s %s: %s Technical details: %s",
-                "NOAA Station" if self.hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
+                "%s %s: Timeout fetching data (attempt %d/%d)",
+                source_type.capitalize(),
                 self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
+                self._consecutive_failures,
+                self._max_consecutive_failures,
             )
-            raise UpdateFailed(api_error.message)
+
+            # Provide more detailed error after multiple consecutive timeouts
+            if self._consecutive_failures >= self._max_consecutive_failures:
+                raise UpdateFailed(
+                    f"Timeout fetching data from {source_type} {self.station_id} "
+                    f"after {self._consecutive_failures} attempts. "
+                    f"Check your internet connection and the service status."
+                )
+            else:
+                # If we have previous data, use it instead of failing completely
+                if self.data:
+                    _LOGGER.info(
+                        "%s %s: Using cached data for this update due to timeout",
+                        source_type.capitalize(),
+                        self.station_id,
+                    )
+                    return self.data
+
+                raise UpdateFailed(
+                    f"Timeout fetching data from {source_type} {self.station_id}. "
+                    f"Will retry."
+                )
+
+        except UpdateFailed as err:
+            # For UpdateFailed exceptions, track failures but re-raise with the same message
+            self._consecutive_failures += 1
+            _LOGGER.error(
+                "%s %s: Update failed (attempt %d/%d): %s",
+                source_type.capitalize(),
+                self.station_id,
+                self._consecutive_failures,
+                self._max_consecutive_failures,
+                str(err),
+            )
+
+            # If we have previous data and haven't failed too many times, use cached data
+            if (
+                self.data
+                and self._consecutive_failures < self._max_consecutive_failures
+            ):
+                _LOGGER.info(
+                    "%s %s: Using cached data for this update due to error",
+                    source_type.capitalize(),
+                    self.station_id,
+                )
+                return self.data
+
+            raise
+
+        except (NoaaApiError, NdbcApiError) as err:
+            self._consecutive_failures += 1
+
+            # Extract the ApiError details for better error messages
+            api_error = getattr(err, "api_error", None)
+
+            # Format a helpful error message
+            if api_error and isinstance(api_error, ApiError):
+                error_msg = (
+                    f"{'NOAA Station' if self.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} "
+                    f"{self.station_id}: {api_error.message} (Error code: {api_error.code})"
+                )
+                if api_error.help_url:
+                    error_msg += f" See {api_error.help_url} for more information."
+            else:
+                error_msg = f"{'NOAA Station' if self.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} {self.station_id}: {str(err)}"
+
+            _LOGGER.error(error_msg)
+
+            # If we have previous data and haven't failed too many times, use cached data
+            if (
+                self.data
+                and self._consecutive_failures < self._max_consecutive_failures
+            ):
+                _LOGGER.info(
+                    "%s %s: Using cached data for this update due to error",
+                    source_type.capitalize(),
+                    self.station_id,
+                )
+                return self.data
+
+            raise UpdateFailed(error_msg) from err
+
         except Exception as err:
-            api_error = await self.api_client.handle_error(err)
+            # For all other exceptions, create a nice message and track failures
+            self._consecutive_failures += 1
+
             _LOGGER.error(
-                "%s %s: %s Technical details: %s",
-                "NOAA Station" if self.hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
+                "%s %s: Unexpected error fetching data (attempt %d/%d): %s (%s)",
+                source_type.capitalize(),
                 self.station_id,
-                api_error.message,
-                api_error.technical_detail or "None",
+                self._consecutive_failures,
+                self._max_consecutive_failures,
+                str(err),
+                type(err).__name__,
             )
-            raise UpdateFailed(api_error.message)
+
+            # If we have previous data and haven't failed too many times, use cached data
+            if (
+                self.data
+                and self._consecutive_failures < self._max_consecutive_failures
+            ):
+                _LOGGER.info(
+                    "%s %s: Using cached data for this update due to error",
+                    source_type.capitalize(),
+                    self.station_id,
+                )
+                return self.data
+
+            raise UpdateFailed(
+                f"Error fetching data from {source_type} {self.station_id}: {str(err)}"
+            )
+
+    def _get_missing_sensors(self, data: CoordinatorData) -> list[str]:
+        """Identify selected sensors that are missing from the data.
+
+        Args:
+            data: The data returned from the API
+
+        Returns:
+            list[str]: List of selected sensors that are missing from the data
+        """
+        missing_sensors = []
+
+        for sensor in self.selected_sensors:
+            # Skip checking sensors that are part of composite data
+            if self._is_composite_sensor(sensor, data):
+                continue
+
+            # Check if the sensor data exists and has a state
+            if sensor not in data or not self._has_valid_state(data[sensor]):
+                missing_sensors.append(sensor)
+
+        return missing_sensors
+
+    def _is_composite_sensor(self, sensor_id: str, data: CoordinatorData) -> bool:
+        """Check if a sensor is part of composite data created from other sensors.
+
+        Some sensors like wind_direction and wind_speed are fetched together.
+
+        Args:
+            sensor_id: The sensor ID to check
+            data: The current data
+
+        Returns:
+            bool: True if this sensor's data is part of a composite
+        """
+        # Define composite relationships
+        composites = {
+            "wind_direction": ["wind_speed"],
+            "wind_speed": ["wind_direction"],
+            "currents_direction": ["currents_speed"],
+            "currents_speed": ["currents_direction"],
+        }
+
+        # Check if any of the composite's related sensors are in the data
+        if sensor_id in composites:
+            return any(
+                dep in data and self._has_valid_state(data[dep])
+                for dep in composites[sensor_id]
+            )
+
+        return False
+
+    def _has_valid_state(self, sensor_data: Any) -> bool:
+        """Check if sensor data has a valid state.
+
+        Args:
+            sensor_data: The sensor data to check
+
+        Returns:
+            bool: True if the sensor has valid state data
+        """
+        if not sensor_data:
+            return False
+
+        # Check both dictionary format and direct state attributes
+        if isinstance(sensor_data, dict):
+            return "state" in sensor_data and sensor_data["state"] is not None
+
+        # If it has a state attribute directly
+        return hasattr(sensor_data, "state") and sensor_data.state is not None
