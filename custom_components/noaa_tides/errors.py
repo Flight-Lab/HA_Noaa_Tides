@@ -1,4 +1,19 @@
-"""Error types for the NOAA Tides integration."""
+"""Error types for the NOAA Tides Extended integration.
+
+This module defines exceptions used throughout the integration to provide
+consistent error handling and user-friendly messages.
+
+Common error codes:
+- timeout: Connection timed out
+- station_not_found: NOAA station ID not found
+- buoy_not_found: NDBC buoy ID not found
+- server_error: Server error (HTTP 500, 502, 503, or 504)
+- rate_limit: Too many requests (HTTP 429)
+- invalid_data: Invalid data received from API
+- connection_error: General connection error
+- decode_error: Error decoding response (NDBC specific)
+- unknown_error: Unspecified error
+"""
 
 from __future__ import annotations
 
@@ -8,7 +23,14 @@ from typing import Optional
 
 @dataclass
 class ApiError:
-    """Base class for API errors with user-friendly messages."""
+    """Base class for API errors with user-friendly messages.
+
+    Attributes:
+        code: Machine-readable error code
+        message: User-friendly error message
+        technical_detail: Additional details for debugging (not shown to users)
+        help_url: URL to relevant documentation if available
+    """
 
     code: str
     message: str
@@ -17,7 +39,10 @@ class ApiError:
 
 
 class NoaaApiError(Exception):
-    """Exception for NOAA API errors."""
+    """Exception for NOAA API errors.
+
+    Contains a structured ApiError object with code, message, and details.
+    """
 
     def __init__(self, api_error: ApiError, operation: str = "API call") -> None:
         """Initialize the exception.
@@ -32,7 +57,10 @@ class NoaaApiError(Exception):
 
 
 class NdbcApiError(Exception):
-    """Exception for NDBC API errors."""
+    """Exception for NDBC API errors.
+
+    Contains a structured ApiError object with code, message, and details.
+    """
 
     def __init__(self, api_error: ApiError, operation: str = "API call") -> None:
         """Initialize the exception.
@@ -46,7 +74,10 @@ class NdbcApiError(Exception):
 
 
 class StationNotFoundError(NoaaApiError):
-    """Exception raised when a NOAA station is not found."""
+    """Exception raised when a NOAA station is not found.
+
+    Typically occurs with a 404 response from the NOAA API.
+    """
 
     def __init__(self, station_id: str, operation: str = "API call") -> None:
         """Initialize the exception.
@@ -65,7 +96,10 @@ class StationNotFoundError(NoaaApiError):
 
 
 class BuoyNotFoundError(NdbcApiError):
-    """Exception raised when an NDBC buoy is not found."""
+    """Exception raised when an NDBC buoy is not found.
+
+    Typically occurs with a 404 response from the NDBC API.
+    """
 
     def __init__(self, buoy_id: str, operation: str = "API call") -> None:
         """Initialize the exception.
@@ -84,7 +118,10 @@ class BuoyNotFoundError(NdbcApiError):
 
 
 class NoaaConnectionTimeoutError(NoaaApiError):
-    """Exception raised when a connection to NOAA API times out."""
+    """Exception raised when a connection to NOAA API times out.
+
+    Generally a transient error that may be resolved by retrying.
+    """
 
     def __init__(self, station_id: str, operation: str = "API call") -> None:
         """Initialize the exception.
@@ -102,7 +139,10 @@ class NoaaConnectionTimeoutError(NoaaApiError):
 
 
 class NdbcConnectionTimeoutError(NdbcApiError):
-    """Exception raised when a connection to NDBC API times out."""
+    """Exception raised when a connection to NDBC API times out.
+
+    Generally a transient error that may be resolved by retrying.
+    """
 
     def __init__(self, buoy_id: str, operation: str = "API call") -> None:
         """Initialize the exception.
@@ -120,7 +160,10 @@ class NdbcConnectionTimeoutError(NdbcApiError):
 
 
 class ServerError(Exception):
-    """Exception raised when a server error occurs."""
+    """Exception raised when a server error occurs (5xx status code).
+
+    Generally a transient error that may be resolved by retrying later.
+    """
 
     def __init__(
         self,
@@ -154,7 +197,10 @@ class ServerError(Exception):
 
 
 class RateLimitError(Exception):
-    """Exception raised when rate limits are exceeded."""
+    """Exception raised when rate limits are exceeded (429 status code).
+
+    Resolved by waiting before making additional requests.
+    """
 
     def __init__(
         self, source_id: str, is_noaa: bool = True, operation: str = "API call"
@@ -183,7 +229,10 @@ class RateLimitError(Exception):
 
 
 class InvalidDataError(Exception):
-    """Exception raised when invalid data is received."""
+    """Exception raised when invalid data is received.
+
+    May indicate API changes or temporary service issues.
+    """
 
     def __init__(
         self,
