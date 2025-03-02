@@ -144,7 +144,13 @@ SENSOR_SECTION_MAP: Final = {
     DATA_OCEAN_CURRENT: OCEAN_CURRENT_SENSORS,
 }
 
-# Mapping for overlapping wave height sensors (when same measurement exists in multiple sections)
-OVERLAPPING_WAVE_HEIGHT_SENSORS: Final = {
-    "meteo_wvht": "spec_wave_wvht",  # Prefer spectral wave height over meteorological wave height
+# Mapping for overlapping sensors (when same measurement exists in multiple sections)
+# Prioritize spectral wave data over meteorological data for better accuracy
+OVERLAPPING_SENSORS: Final = {
+    # Wave height
+    "meteo_wvht": "spec_wave_wvht",  # Prefer spectral wave height over meteorological
+    # Wave period
+    "meteo_apd": "spec_wave_apd",  # Prefer spectral average wave period over meteorological
+    # Wave direction
+    "meteo_mwd": "spec_wave_mwd",  # Prefer spectral mean wave direction over meteorological
 }
