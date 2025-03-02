@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.device_registry import DeviceEntryType, async_get
 
 from . import const
 from .coordinator import NoaaTidesDataUpdateCoordinator
@@ -50,6 +51,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Store coordinator before first refresh to ensure it's available for the platforms
     hass.data.setdefault(const.DOMAIN, {})
     hass.data[const.DOMAIN][entry.entry_id] = coordinator
+
+    # Register device immediately to ensure it exists before entity creation
+    device_registry = async_get(hass)
+
+    # Create device entry with proper identifiers
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(const.DOMAIN, entry.entry_id)},
+        name=entry.data.get("name", ""),
+        manufacturer=(
+            "The National Oceanic & Atmospheric Administration"
+            if entry.data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA
+            else "The National Data Buoy Center"
+        ),
+        model=(
+            f"NOAA Station {coordinator.station_id}"
+            if entry.data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA
+            else f"NDBC Buoy {coordinator.station_id}"
+        ),
+        entry_type=DeviceEntryType.SERVICE,
+    )
 
     # Set up platforms first so entities are ready for the data
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
