@@ -14,6 +14,7 @@ from . import const
 from .api_clients import NoaaApiClient, NdbcApiClient
 from .errors import NoaaApiError, NdbcApiError, ApiError
 from .types import CoordinatorData
+from .utils import determine_required_data_sections
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -55,7 +56,19 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self.selected_sensors: Final = selected_sensors
         self.timezone: Final = timezone
         self.unit_system: Final = unit_system
-        self.data_sections: Final = data_sections or []
+
+        # For NDBC, determine required data sections based on selected sensors
+        if hub_type == const.HUB_TYPE_NDBC:
+            self.data_sections: Final = determine_required_data_sections(
+                selected_sensors
+            )
+            _LOGGER.debug(
+                "NDBC Buoy %s: Using data sections %s based on selected sensors",
+                station_id,
+                self.data_sections,
+            )
+        else:
+            self.data_sections: Final = data_sections or []
 
         # Initialize the appropriate API client
         if hub_type == const.HUB_TYPE_NOAA:
@@ -64,7 +77,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             )
         else:
             self.api_client: Final = NdbcApiClient(
-                hass, station_id, timezone, unit_system, data_sections
+                hass, station_id, timezone, unit_system, self.data_sections
             )
 
         super().__init__(
