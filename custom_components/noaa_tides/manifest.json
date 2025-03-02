@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/Flight-Lab/ha_noaa_tides/issues",
   "loggers": ["noaa_tides"],
   "requirements": [],
-  "version": "0.5.2"
+  "version": "0.6.0"
 }
