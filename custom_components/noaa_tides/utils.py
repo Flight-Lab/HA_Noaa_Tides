@@ -158,8 +158,11 @@ async def validate_ndbc_buoy(
     return await validate_data_source(hass, buoy_id, const.HUB_TYPE_NDBC, all_sections)
 
 
-def _deduplicate_wave_height_sensors(sensors: dict[str, str]) -> dict[str, str]:
-    """Remove duplicate wave height sensors, preferring spectral wave data over meteorological.
+def _deduplicate_overlapping_sensors(sensors: dict[str, str]) -> dict[str, str]:
+    """Remove duplicate sensors, preferring spectral wave data over meteorological.
+
+    Prioritizes higher quality data sources when the same measurement is available
+    from multiple sources. Currently handles wave height, wave period, and wave direction.
 
     Args:
         sensors: Dictionary of discovered sensors
@@ -169,15 +172,24 @@ def _deduplicate_wave_height_sensors(sensors: dict[str, str]) -> dict[str, str]:
     """
     result = sensors.copy()
 
-    # Check for overlapping wave height sensors and remove the lower quality ones
-    for meteo_sensor, spec_sensor in const.OVERLAPPING_WAVE_HEIGHT_SENSORS.items():
+    # Check for overlapping sensors and remove the lower quality ones
+    for meteo_sensor, spec_sensor in const.OVERLAPPING_SENSORS.items():
         if meteo_sensor in result and spec_sensor in result:
-            # If both wave height sensors exist, remove the meteorological one
+            # If both sensors exist, remove the meteorological one
+            sensor_type = "wave measurement"
+            if "wvht" in meteo_sensor:
+                sensor_type = "wave height"
+            elif "apd" in meteo_sensor:
+                sensor_type = "average wave period"
+            elif "mwd" in meteo_sensor:
+                sensor_type = "wave direction"
+
             result.pop(meteo_sensor)
             _LOGGER.debug(
-                "Preferring %s over %s for wave height measurement",
+                "Preferring %s over %s for %s measurement",
                 spec_sensor,
                 meteo_sensor,
+                sensor_type,
             )
 
     return result
@@ -495,12 +507,13 @@ async def discover_ndbc_sensors(
                                             current_mapping[header],
                                         )
 
-        # Deduplicate wave height sensors, preferring spectral wave over meteorological
-        deduplicated_sensors = _deduplicate_wave_height_sensors(sensors)
+        # Deduplicate overlapping sensors, preferring spectral wave over meteorological
+        deduplicated_sensors = _deduplicate_overlapping_sensors(sensors)
 
         if len(deduplicated_sensors) < len(sensors):
             _LOGGER.debug(
-                "NDBC Buoy %s: Deduplicated overlapping wave height sensors", buoy_id
+                "NDBC Buoy %s: Deduplicated overlapping wave sensors for better accuracy",
+                buoy_id,
             )
 
         _LOGGER.debug(
