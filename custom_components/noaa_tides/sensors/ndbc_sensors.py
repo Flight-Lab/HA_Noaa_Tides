@@ -5,7 +5,13 @@ from __future__ import annotations
 from typing import Final
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
-from homeassistant.const import DEGREE, UnitOfLength, UnitOfSpeed, UnitOfTemperature
+from homeassistant.const import (
+    DEGREE,
+    UnitOfLength,
+    UnitOfPressure,
+    UnitOfSpeed,
+    UnitOfTemperature,
+)
 
 from ..types import NoaaTidesSensorEntityDescription
 
@@ -81,6 +87,53 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         unit_metric=UnitOfTemperature.CELSIUS,
         unit_imperial=UnitOfTemperature.FAHRENHEIT,
+        is_ndbc=True,
+    ),
+    # Adding the missing meteorological sensors
+    "meteo_pres": NoaaTidesSensorEntityDescription(
+        key="meteo_pres",
+        name="Barometric Pressure",
+        device_class=SensorDeviceClass.PRESSURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfPressure.HPA,
+        unit_imperial=UnitOfPressure.INHG,
+        is_ndbc=True,
+    ),
+    "meteo_atmp": NoaaTidesSensorEntityDescription(
+        key="meteo_atmp",
+        name="Air Temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfTemperature.CELSIUS,
+        unit_imperial=UnitOfTemperature.FAHRENHEIT,
+        is_ndbc=True,
+    ),
+    "meteo_dewp": NoaaTidesSensorEntityDescription(
+        key="meteo_dewp",
+        name="Dew Point",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfTemperature.CELSIUS,
+        unit_imperial=UnitOfTemperature.FAHRENHEIT,
+        is_ndbc=True,
+    ),
+    "meteo_ptdy": NoaaTidesSensorEntityDescription(
+        key="meteo_ptdy",
+        name="Pressure Tendency",
+        device_class=SensorDeviceClass.PRESSURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfPressure.HPA,
+        unit_imperial=UnitOfPressure.INHG,
+        is_ndbc=True,
+    ),
+    "meteo_tide": NoaaTidesSensorEntityDescription(
+        key="meteo_tide",
+        name="Tide Level",
+        device_class=SensorDeviceClass.DISTANCE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfLength.METERS,
+        unit_imperial=UnitOfLength.FEET,
+        icon="mdi:waves",
         is_ndbc=True,
     ),
     # Spectral Wave Sensors
