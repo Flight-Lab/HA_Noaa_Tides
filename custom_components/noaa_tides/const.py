@@ -104,3 +104,53 @@ ATTR_TIDE_PERCENTAGE: Final = "tide_percentage"
 ATTR_CURRENTS_SPEED: Final = "currents_speed"
 ATTR_CURRENTS_DIRECTION: Final = "currents_direction"
 ATTR_CURRENTS_TIME: Final = "currents_time"
+
+# Sensor data section mapping
+METEO_SENSORS: Final = [
+    "meteo_wdir",
+    "meteo_wspd",
+    "meteo_gst",
+    "meteo_wvht",
+    "meteo_dpd",
+    "meteo_apd",
+    "meteo_mwd",
+    "meteo_pres",
+    "meteo_atmp",
+    "meteo_wtmp",
+    "meteo_dewp",
+    "meteo_ptdy",
+    "meteo_tide",
+]
+
+SPEC_WAVE_SENSORS: Final = [
+    "spec_wave_wvht",
+    "spec_wave_swh",
+    "spec_wave_swp",
+    "spec_wave_wwh",
+    "spec_wave_wwp",
+    "spec_wave_swd",
+    "spec_wave_wwd",
+    "spec_wave_steepness",
+    "spec_wave_apd",
+    "spec_wave_mwd",
+]
+
+OCEAN_CURRENT_SENSORS: Final = ["current_depth", "current_drct", "current_spdd"]
+
+# Mapping for which section contains which sensors
+SENSOR_SECTION_MAP: Final = {
+    DATA_METEOROLOGICAL: METEO_SENSORS,
+    DATA_SPECTRAL_WAVE: SPEC_WAVE_SENSORS,
+    DATA_OCEAN_CURRENT: OCEAN_CURRENT_SENSORS,
+}
+
+# Mapping for overlapping sensors (when same measurement exists in multiple sections)
+# Prioritize spectral wave data over meteorological data for better accuracy
+OVERLAPPING_SENSORS: Final = {
+    # Wave height
+    "meteo_wvht": "spec_wave_wvht",  # Prefer spectral wave height over meteorological
+    # Wave period
+    "meteo_apd": "spec_wave_apd",  # Prefer spectral average wave period over meteorological
+    # Wave direction
+    "meteo_mwd": "spec_wave_mwd",  # Prefer spectral mean wave direction over meteorological
+}

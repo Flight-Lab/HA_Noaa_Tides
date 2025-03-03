@@ -130,24 +130,9 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
         clean_station_name = station_name.lower().replace(" ", "_")
         self.entity_id = f"sensor.{clean_station_name}_{description.key}"
 
-        # Get original name with proper case from config entry
-        original_name = entry.data.get("name", "")
-        clean_station_name = original_name.strip()
-
-        # Set up device info - using cleaner approach
+        # Reference the device that was created in __init__.py
         self._attr_device_info = DeviceInfo(
             identifiers={(const.DOMAIN, entry_id)},
-            name=clean_station_name,
-            manufacturer=(
-                "The National Oceanic & Atmospheric Administration"
-                if coordinator.hub_type == const.HUB_TYPE_NOAA
-                else "The National Data Buoy Center"
-            ),
-            model=(
-                f"NOAA Station {coordinator.station_id}"
-                if coordinator.hub_type == const.HUB_TYPE_NOAA
-                else f"NDBC Buoy {coordinator.station_id}"
-            ),
         )
 
         # Set the native unit of measurement using the utility function

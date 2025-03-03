@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from ..const import (
     DATA_METEOROLOGICAL,
     DATA_OCEAN_CURRENT,
+    DATA_SECTIONS,
     DATA_SPECTRAL_WAVE,
     NDBC_CURRENT_URL,
     NDBC_METEO_URL,
@@ -22,7 +23,7 @@ from ..const import (
 )
 from ..errors import ApiError
 from ..types import CoordinatorData
-from ..utils import degrees_to_cardinal
+from ..utils import degrees_to_cardinal, determine_required_data_sections
 from .base_api_client import BaseApiClient
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -53,7 +54,8 @@ class NdbcApiClient(BaseApiClient):
             data_sections: Selected data sections to monitor
         """
         super().__init__(hass, station_id, timezone, unit_system)
-        self.data_sections = data_sections or []
+        # Store all data sections but will only fetch from needed ones
+        self.data_sections = data_sections or list(DATA_SECTIONS.keys())
         self._is_noaa = False
 
     async def fetch_data(self, selected_sensors: list[str]) -> CoordinatorData:
@@ -72,13 +74,22 @@ class NdbcApiClient(BaseApiClient):
             data: CoordinatorData = {}
             tasks = []
 
-            # Create tasks based on selected data sections
-            if DATA_METEOROLOGICAL in self.data_sections:
-                tasks.append(self._fetch_meteorological())
-            if DATA_SPECTRAL_WAVE in self.data_sections:
-                tasks.append(self._fetch_spectral_wave())
-            if DATA_OCEAN_CURRENT in self.data_sections:
-                tasks.append(self._fetch_ocean_current())
+            # Only fetch from sections with active sensors
+            required_sections = determine_required_data_sections(selected_sensors)
+            _LOGGER.debug(
+                "NDBC Buoy %s: Fetching from required data sections: %s",
+                self.station_id,
+                required_sections,
+            )
+
+            # Create tasks only for required sections
+            for section in required_sections:
+                if section == DATA_METEOROLOGICAL:
+                    tasks.append(self._fetch_meteorological())
+                elif section == DATA_SPECTRAL_WAVE:
+                    tasks.append(self._fetch_spectral_wave())
+                elif section == DATA_OCEAN_CURRENT:
+                    tasks.append(self._fetch_ocean_current())
 
             # Execute all tasks concurrently
             async with asyncio.TaskGroup() as tg:

@@ -49,6 +49,9 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
 
         if user_input is not None:
             self._data.update(user_input)
+            # If NDBC buoy, automatically set all data sections
+            if self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NDBC:
+                self._data[const.CONF_DATA_SECTIONS] = list(const.DATA_SECTIONS)
             return await self.async_step_station_config()
 
         return self.async_show_form(
@@ -86,8 +89,10 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                 )
             else:
                 self._data.update(user_input)
+                # For NDBC buoys, automatically set all data sections
                 if not is_noaa:
-                    return await self.async_step_ndbc_data()
+                    self._data[const.CONF_DATA_SECTIONS] = list(const.DATA_SECTIONS)
+
                 return await self.async_step_sensor_select()
 
         # Build schema based on hub type
@@ -112,31 +117,6 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
         return self.async_show_form(
             step_id="station_config",
             data_schema=vol.Schema(schema),
-            errors=errors,
-        )
-
-    async def async_step_ndbc_data(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle NDBC data section selection."""
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            if not user_input.get(const.CONF_DATA_SECTIONS, []):
-                errors["base"] = const.ERROR_NO_DATA_SECTIONS
-            else:
-                self._data.update(user_input)
-                return await self.async_step_sensor_select()
-
-        return self.async_show_form(
-            step_id="ndbc_data",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(const.CONF_DATA_SECTIONS): cv.multi_select(
-                        const.DATA_SECTIONS
-                    ),
-                }
-            ),
             errors=errors,
         )
 
@@ -201,9 +181,8 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
         if self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA:
             return await validate_noaa_station(self.hass, station_id)
         else:
-            return await validate_ndbc_buoy(
-                self.hass, station_id, self._data.get(const.CONF_DATA_SECTIONS, [])
-            )
+            # For NDBC buoys, check all data sections
+            return await validate_ndbc_buoy(self.hass, station_id)
 
     async def _discover_sensors(self) -> dict[str, str]:
         """Discover available sensors based on hub type and configuration."""
@@ -212,10 +191,11 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                 self.hass, self._data[const.CONF_STATION_ID]
             )
         else:
+            # For NDBC buoys, check all data sections
             return await discover_ndbc_sensors(
                 self.hass,
                 self._data[const.CONF_BUOY_ID],
-                self._data.get(const.CONF_DATA_SECTIONS, []),
+                list(const.DATA_SECTIONS),
             )
 
     @staticmethod

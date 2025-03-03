@@ -59,8 +59,8 @@ async def validate_data_source(
 
         # NDBC Buoy validation
         else:
-            # If no data sections specified, default to meteorological
-            selected_sections = data_sections or [const.DATA_METEOROLOGICAL]
+            # If no data sections specified, default to all available sections
+            selected_sections = data_sections or list(const.DATA_SECTIONS)
 
             tasks: list[asyncio.Task[aiohttp.ClientResponse]] = []
 
@@ -140,22 +140,79 @@ async def validate_noaa_station(hass: HomeAssistant, station_id: str) -> bool:
 
 
 async def validate_ndbc_buoy(
-    hass: HomeAssistant, buoy_id: str, data_sections: list[str]
+    hass: HomeAssistant, buoy_id: str, data_sections: list[str] = None
 ) -> bool:
     """Validate an NDBC buoy ID by checking the specified data sections.
 
     Args:
         hass: HomeAssistant instance
         buoy_id: NDBC buoy identifier to validate
-        data_sections: Data sections to check for validation
+        data_sections: Data sections to check for validation (optional)
 
     Returns:
         bool: True if buoy is valid, False otherwise
     """
-    _LOGGER.debug(
-        "NDBC Buoy %s: Validating buoy ID with sections %s", buoy_id, data_sections
-    )
-    return await validate_data_source(hass, buoy_id, const.HUB_TYPE_NDBC, data_sections)
+    # Always check all sections regardless of what was passed
+    all_sections = list(const.DATA_SECTIONS)
+    _LOGGER.debug("NDBC Buoy %s: Validating buoy ID with all data sections", buoy_id)
+    return await validate_data_source(hass, buoy_id, const.HUB_TYPE_NDBC, all_sections)
+
+
+def _deduplicate_overlapping_sensors(sensors: dict[str, str]) -> dict[str, str]:
+    """Remove duplicate sensors, preferring spectral wave data over meteorological.
+
+    Prioritizes higher quality data sources when the same measurement is available
+    from multiple sources. Currently handles wave height, wave period, and wave direction.
+
+    Args:
+        sensors: Dictionary of discovered sensors
+
+    Returns:
+        dict[str, str]: Deduplicated sensors dictionary
+    """
+    result = sensors.copy()
+
+    # Check for overlapping sensors and remove the lower quality ones
+    for meteo_sensor, spec_sensor in const.OVERLAPPING_SENSORS.items():
+        if meteo_sensor in result and spec_sensor in result:
+            # If both sensors exist, remove the meteorological one
+            sensor_type = "wave measurement"
+            if "wvht" in meteo_sensor:
+                sensor_type = "wave height"
+            elif "apd" in meteo_sensor:
+                sensor_type = "average wave period"
+            elif "mwd" in meteo_sensor:
+                sensor_type = "wave direction"
+
+            result.pop(meteo_sensor)
+            _LOGGER.debug(
+                "Preferring %s over %s for %s measurement",
+                spec_sensor,
+                meteo_sensor,
+                sensor_type,
+            )
+
+    return result
+
+
+def determine_required_data_sections(selected_sensors: list[str]) -> list[str]:
+    """Determine which data sections are needed based on selected sensors.
+
+    Args:
+        selected_sensors: List of selected sensor IDs
+
+    Returns:
+        list[str]: List of required data sections
+    """
+    required_sections = set()
+
+    for sensor in selected_sensors:
+        for section, sensors in const.SENSOR_SECTION_MAP.items():
+            if sensor in sensors:
+                required_sections.add(section)
+                break
+
+    return list(required_sections)
 
 
 async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[str, str]:
@@ -450,8 +507,19 @@ async def discover_ndbc_sensors(
                                             current_mapping[header],
                                         )
 
-        _LOGGER.debug("NDBC Buoy %s: Final discovered sensors: %s", buoy_id, sensors)
-        return sensors
+        # Deduplicate overlapping sensors, preferring spectral wave over meteorological
+        deduplicated_sensors = _deduplicate_overlapping_sensors(sensors)
+
+        if len(deduplicated_sensors) < len(sensors):
+            _LOGGER.debug(
+                "NDBC Buoy %s: Deduplicated overlapping wave sensors for better accuracy",
+                buoy_id,
+            )
+
+        _LOGGER.debug(
+            "NDBC Buoy %s: Final discovered sensors: %s", buoy_id, deduplicated_sensors
+        )
+        return deduplicated_sensors
 
     except Exception as err:
         _LOGGER.error(
