@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import Any, Final, Optional, TypeVar
+from typing import Any, Final, TypeVar
 
 import aiohttp
 
@@ -49,6 +49,7 @@ class BaseApiClient:
             station_id: The station or buoy ID
             timezone: The timezone setting
             unit_system: The unit system to use
+
         """
         self.hass = hass
         self.station_id = station_id
@@ -68,6 +69,7 @@ class BaseApiClient:
 
         Raises:
             NotImplementedError: If the subclass does not implement this method
+
         """
         raise NotImplementedError("Subclasses must implement this method")
 
@@ -82,6 +84,7 @@ class BaseApiClient:
 
         Returns:
             ApiError: A structured error object with user-friendly messages
+
         """
         # Map the exception to a more specific error type
         specific_error = map_exception_to_error(
@@ -105,6 +108,7 @@ class BaseApiClient:
 
         Args:
             error: The API error to log
+
         """
         service_type = "NOAA Station" if self._is_noaa else "NDBC Buoy"
         _LOGGER.error(
@@ -119,7 +123,10 @@ class BaseApiClient:
         )
 
     async def _safe_request(
-        self, url: str, params: dict[str, Any] = None, timeout: int = DEFAULT_TIMEOUT
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+        timeout: int = DEFAULT_TIMEOUT,
     ) -> dict[str, Any]:
         """Make a safe request to the API with error handling.
 
@@ -137,6 +144,7 @@ class BaseApiClient:
 
         Raises:
             UpdateFailed: If there's an error making the request
+
         """
         try:
             client_timeout = aiohttp.ClientTimeout(total=timeout)
@@ -153,7 +161,7 @@ class BaseApiClient:
     async def _safe_request_with_retry(
         self,
         url: str,
-        params: dict[str, Any] = None,
+        params: dict[str, Any] | None = None,
         timeout: int = DEFAULT_TIMEOUT,
         method: str = "GET",
         operation: str = "API call",
@@ -176,6 +184,7 @@ class BaseApiClient:
 
         Raises:
             UpdateFailed: If there's an error making the request after retries
+
         """
         return await self._make_request_with_retry(
             url, params, timeout, method, response_format="json", operation=operation
@@ -184,7 +193,7 @@ class BaseApiClient:
     async def _safe_request_with_retry_text(
         self,
         url: str,
-        params: dict[str, Any] = None,
+        params: dict[str, Any] | None = None,
         timeout: int = DEFAULT_TIMEOUT,
         method: str = "GET",
         operation: str = "API call",
@@ -205,6 +214,7 @@ class BaseApiClient:
 
         Raises:
             UpdateFailed: If there's an error making the request after retries
+
         """
         return await self._make_request_with_retry(
             url, params, timeout, method, response_format="text", operation=operation
@@ -213,7 +223,7 @@ class BaseApiClient:
     async def _make_request_with_retry(
         self,
         url: str,
-        params: Optional[dict[str, Any]],
+        params: dict[str, Any] | None,
         timeout: int,
         method: str,
         response_format: str,
@@ -234,6 +244,7 @@ class BaseApiClient:
 
         Raises:
             UpdateFailed: If there's an error making the request after retries
+
         """
         attempts = 0
         max_attempts = 3
@@ -270,7 +281,7 @@ class BaseApiClient:
                     if response.status == 429:  # Rate limit
                         retry_after = int(response.headers.get("Retry-After", "60"))
                         _LOGGER.warning(
-                            "%s %s: Rate limited. Retrying after %s seconds.",
+                            "%s %s: Rate limited, retrying after %s seconds",
                             "NOAA Station" if self._is_noaa else "NDBC Buoy",
                             self.station_id,
                             retry_after,
@@ -284,12 +295,9 @@ class BaseApiClient:
                     # Return the appropriate response format
                     if response_format == "json":
                         return await response.json()
-                    elif response_format == "text":
+                    if response_format == "text":
                         return await response.text()
-                    else:
-                        raise ValueError(
-                            f"Unsupported response format: {response_format}"
-                        )
+                    raise ValueError(f"Unsupported response format: {response_format}")
 
             except (aiohttp.ClientConnectionError, asyncio.TimeoutError) as err:
                 attempts += 1
@@ -334,3 +342,4 @@ class BaseApiClient:
                 raise UpdateFailed(
                     f"{api_error.message} ({operation_with_endpoint})"
                 ) from err
+        return None
