@@ -2,18 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
-
-
-@dataclass
-class ApiError:
-    """Base class for API errors with user-friendly messages."""
-
-    code: str
-    message: str
-    technical_detail: Optional[str] = None
-    help_url: Optional[str] = None
+from .types import ApiError
 
 
 class NoaaApiError(Exception):
@@ -25,6 +14,7 @@ class NoaaApiError(Exception):
         Args:
             api_error: The API error details
             operation: Description of the operation being performed
+
         """
         operation_desc = f" during {operation}" if operation else ""
         self.api_error = api_error
@@ -39,6 +29,8 @@ class NdbcApiError(Exception):
 
         Args:
             api_error: The API error details
+            operation: Description of the operation being performed
+
         """
         operation_desc = f" during {operation}" if operation else ""
         self.api_error = api_error
@@ -54,6 +46,7 @@ class StationNotFoundError(NoaaApiError):
         Args:
             station_id: The station ID that was not found
             operation: Description of the operation being performed
+
         """
         operation_desc = f" during {operation}" if operation else ""
         api_error = ApiError(
@@ -73,6 +66,7 @@ class BuoyNotFoundError(NdbcApiError):
         Args:
             buoy_id: The buoy ID that was not found
             operation: Description of the operation being performed
+
         """
         operation_desc = f" during {operation}" if operation else ""
         api_error = ApiError(
@@ -92,6 +86,7 @@ class NoaaConnectionTimeoutError(NoaaApiError):
         Args:
             station_id: The station ID
             operation: Description of the operation being performed
+
         """
         operation_desc = f" during {operation}" if operation else ""
         api_error = ApiError(
@@ -110,6 +105,7 @@ class NdbcConnectionTimeoutError(NdbcApiError):
         Args:
             buoy_id: The buoy ID
             operation: Description of the operation being performed
+
         """
         operation_desc = f" during {operation}" if operation else ""
         api_error = ApiError(
@@ -136,6 +132,7 @@ class ServerError(Exception):
             status_code: The HTTP status code
             is_noaa: Whether this is a NOAA station (True) or NDBC buoy (False)
             operation: Description of the operation being performed
+
         """
         operation_desc = f" during {operation}" if operation else ""
         prefix = "Station" if is_noaa else "Buoy"
@@ -165,6 +162,7 @@ class RateLimitError(Exception):
             source_id: The station or buoy ID
             is_noaa: Whether this is a NOAA station (True) or NDBC buoy (False)
             operation: Description of the operation being performed
+
         """
         operation_desc = f" during {operation}" if operation else ""
         prefix = "Station" if is_noaa else "Buoy"
@@ -199,6 +197,7 @@ class InvalidDataError(Exception):
             error_detail: Additional error details
             is_noaa: Whether this is a NOAA station (True) or NDBC buoy (False)
             operation: Description of the operation being performed
+
         """
         operation_desc = f" during {operation}" if operation else ""
         prefix = "Station" if is_noaa else "Buoy"
