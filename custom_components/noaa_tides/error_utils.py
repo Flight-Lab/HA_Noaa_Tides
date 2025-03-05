@@ -42,6 +42,7 @@ async def handle_api_error(
 
     Returns:
         ApiError: A structured error object with user-friendly messages
+
     """
     prefix = "Station" if is_noaa else "Buoy"
     service_name = "NOAA" if is_noaa else "NDBC"
@@ -124,6 +125,7 @@ async def handle_noaa_api_error(error: Exception, station_id: str) -> ApiError:
 
     Returns:
         ApiError: A structured error object with user-friendly messages
+
     """
     return await handle_api_error(error, station_id, is_noaa=True)
 
@@ -139,6 +141,7 @@ async def handle_ndbc_api_error(error: Exception, buoy_id: str) -> ApiError:
 
     Returns:
         ApiError: A structured error object with user-friendly messages
+
     """
     return await handle_api_error(error, buoy_id, is_noaa=False)
 
@@ -162,6 +165,7 @@ def map_exception_to_error(
 
     Returns:
         Exception: A more specific exception type
+
     """
     if isinstance(exception, asyncio.TimeoutError):
         return (
