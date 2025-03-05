@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import Final
 
+from homeassistant.const import Platform
+
 from .types import DataSectionType, TimezoneType, UnitSystemType
 
 # Domain and Platform Configuration
 DOMAIN: Final = "noaa_tides"
-PLATFORMS: Final[list[str]] = ["sensor"]
+PLATFORMS: Final[list[Platform]] = [Platform.SENSOR]
 
 # Hub Types
 HUB_TYPE_NOAA: Final = "noaa_station"
@@ -106,7 +108,7 @@ ATTR_CURRENTS_DIRECTION: Final = "currents_direction"
 ATTR_CURRENTS_TIME: Final = "currents_time"
 
 # Sensor data section mapping
-METEO_SENSORS: Final = [
+METEO_SENSORS: Final[list[str]] = [
     "meteo_wdir",
     "meteo_wspd",
     "meteo_gst",
@@ -122,7 +124,7 @@ METEO_SENSORS: Final = [
     "meteo_tide",
 ]
 
-SPEC_WAVE_SENSORS: Final = [
+SPEC_WAVE_SENSORS: Final[list[str]] = [
     "spec_wave_wvht",
     "spec_wave_swh",
     "spec_wave_swp",
@@ -138,7 +140,7 @@ SPEC_WAVE_SENSORS: Final = [
 OCEAN_CURRENT_SENSORS: Final = ["current_depth", "current_drct", "current_spdd"]
 
 # Mapping for which section contains which sensors
-SENSOR_SECTION_MAP: Final = {
+SENSOR_SECTION_MAP: Final[dict[str, list[str]]] = {
     DATA_METEOROLOGICAL: METEO_SENSORS,
     DATA_SPECTRAL_WAVE: SPEC_WAVE_SENSORS,
     DATA_OCEAN_CURRENT: OCEAN_CURRENT_SENSORS,
@@ -146,7 +148,7 @@ SENSOR_SECTION_MAP: Final = {
 
 # Mapping for overlapping sensors (when same measurement exists in multiple sections)
 # Prioritize spectral wave data over meteorological data for better accuracy
-OVERLAPPING_SENSORS: Final = {
+OVERLAPPING_SENSORS: Final[dict[str, str]] = {
     # Wave height
     "meteo_wvht": "spec_wave_wvht",  # Prefer spectral wave height over meteorological
     # Wave period

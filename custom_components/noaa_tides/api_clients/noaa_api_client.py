@@ -27,7 +27,7 @@ from ..const import (
     ATTR_TIDE_FACTOR,
     ATTR_TIDE_PERCENTAGE,
     NOAA_DATA_URL,
-    UNIT_IMPERIAL,
+    UNIT_IMPERIAL,  # used indirectly by "english"
     UNIT_METRIC,
 )
 from ..types import CoordinatorData
@@ -57,6 +57,7 @@ class NoaaApiClient(BaseApiClient):
             station_id: The station ID
             timezone: The timezone setting
             unit_system: The unit system to use
+
         """
         super().__init__(hass, station_id, timezone, unit_system)
         self._is_noaa = True
@@ -72,6 +73,7 @@ class NoaaApiClient(BaseApiClient):
 
         Raises:
             UpdateFailed: If there's an error fetching data
+
         """
         try:
             data: CoordinatorData = {}
@@ -128,13 +130,14 @@ class NoaaApiClient(BaseApiClient):
         except Exception as err:
             api_error = await self.handle_error(err)
             self._log_error(api_error)
-            raise UpdateFailed(api_error.message)
+            raise UpdateFailed(api_error.message) from err
 
     async def _fetch_tide_predictions(self) -> dict[str, Any]:
         """Fetch tide predictions and calculate tide state.
 
         Returns:
             dict[str, Any]: Dictionary containing tide prediction data if available
+
         """
         params = {
             "station": self.station_id,
@@ -262,6 +265,7 @@ class NoaaApiClient(BaseApiClient):
 
         Returns:
             dict[str, Any]: Dictionary containing the sensor data if available
+
         """
         params = {
             "station": self.station_id,
@@ -342,6 +346,7 @@ class NoaaApiClient(BaseApiClient):
 
         Returns:
             dict[str, Any]: Dictionary containing currents prediction data if available
+
         """
         params = {
             "station": self.station_id,
@@ -449,6 +454,7 @@ class NoaaApiClient(BaseApiClient):
 
         Returns:
             dict[str, Any]: Dictionary containing currents data if available
+
         """
         params = {
             "station": self.station_id,
@@ -504,6 +510,7 @@ class NoaaApiClient(BaseApiClient):
 
         Returns:
             dict[str, Any]: Dictionary containing wind data if available
+
         """
         _LOGGER.debug("NOAA Station %s: Fetching wind data", self.station_id)
 
@@ -571,6 +578,7 @@ class NoaaApiClient(BaseApiClient):
 
         Returns:
             dict[str, Any]: Dictionary containing sensor data if available
+
         """
         if sensor_type == "wind":
             return await self._fetch_wind_data()

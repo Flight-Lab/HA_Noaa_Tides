@@ -52,6 +52,7 @@ class NdbcApiClient(BaseApiClient):
             timezone: The timezone setting
             unit_system: The unit system to use
             data_sections: Selected data sections to monitor
+
         """
         super().__init__(hass, station_id, timezone, unit_system)
         # Store all data sections but will only fetch from needed ones
@@ -69,6 +70,7 @@ class NdbcApiClient(BaseApiClient):
 
         Raises:
             UpdateFailed: If there's an error fetching data
+
         """
         try:
             data: CoordinatorData = {}
@@ -121,6 +123,7 @@ class NdbcApiClient(BaseApiClient):
 
         Returns:
             dict[str, Any]: Dictionary containing meteorological sensor data if available
+
         """
         try:
             url = NDBC_METEO_URL.format(buoy_id=self.station_id)
@@ -215,6 +218,7 @@ class NdbcApiClient(BaseApiClient):
 
         Returns:
             dict[str, Any]: Dictionary containing spectral wave sensor data if available
+
         """
         try:
             url = NDBC_SPEC_URL.format(buoy_id=self.station_id)
@@ -306,6 +310,7 @@ class NdbcApiClient(BaseApiClient):
 
         Returns:
             dict[str, Any]: Dictionary containing ocean current sensor data if available
+
         """
         try:
             url = NDBC_CURRENT_URL.format(buoy_id=self.station_id)

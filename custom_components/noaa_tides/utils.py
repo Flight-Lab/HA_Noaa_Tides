@@ -44,6 +44,7 @@ async def validate_data_source(
 
     Returns:
         bool: True if source is valid, False otherwise
+
     """
     try:
         session = async_get_clientsession(hass)
@@ -135,6 +136,7 @@ async def validate_noaa_station(hass: HomeAssistant, station_id: str) -> bool:
 
     Returns:
         bool: True if station is valid, False otherwise
+
     """
     return await validate_data_source(hass, station_id, const.HUB_TYPE_NOAA)
 
@@ -151,6 +153,7 @@ async def validate_ndbc_buoy(
 
     Returns:
         bool: True if buoy is valid, False otherwise
+
     """
     # Always check all sections regardless of what was passed
     all_sections = list(const.DATA_SECTIONS)
@@ -169,6 +172,7 @@ def _deduplicate_overlapping_sensors(sensors: dict[str, str]) -> dict[str, str]:
 
     Returns:
         dict[str, str]: Deduplicated sensors dictionary
+
     """
     result = sensors.copy()
 
@@ -203,6 +207,7 @@ def determine_required_data_sections(selected_sensors: list[str]) -> list[str]:
 
     Returns:
         list[str]: List of required data sections
+
     """
     required_sections = set()
 
@@ -224,6 +229,7 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
 
     Returns:
         dict[str, str]: Dictionary mapping sensor keys to display names
+
     """
     _LOGGER.debug("NOAA Station %s: Starting NOAA sensor discovery", station_id)
     try:
@@ -332,6 +338,7 @@ async def discover_ndbc_sensors(
 
     Returns:
         dict[str, str]: Dictionary mapping sensor keys to display names
+
     """
     try:
         session = async_get_clientsession(hass)
@@ -539,6 +546,7 @@ def degrees_to_cardinal(degrees: float | None) -> str | None:
 
     Returns:
         str: Cardinal direction (N, NNE, NE, etc.) or None if degrees is None
+
     """
     if degrees is None:
         return None
@@ -583,6 +591,7 @@ def get_unit_for_sensor(
 
     Returns:
         str | None: The appropriate unit or None if not applicable
+
     """
     # For NOAA sensors with explicit unit configuration in description
     if (
@@ -619,7 +628,7 @@ def get_unit_for_sensor(
 
 
 # Composite sensor group definitions
-COMPOSITE_SENSOR_GROUPS = {
+COMPOSITE_SENSOR_GROUPS: dict[str, list[str]] = {
     "wind_direction": ["wind_speed"],
     "wind_speed": ["wind_direction"],
     "currents_direction": ["currents_speed"],
@@ -638,6 +647,7 @@ def is_part_of_composite_sensor(sensor_key: str) -> bool:
 
     Returns:
         bool: True if this sensor is part of a composite group
+
     """
     return sensor_key in COMPOSITE_SENSOR_GROUPS
 
@@ -650,5 +660,6 @@ def get_related_sensors(sensor_key: str) -> list[str]:
 
     Returns:
         list[str]: List of related sensor keys
+
     """
     return COMPOSITE_SENSOR_GROUPS.get(sensor_key, [])

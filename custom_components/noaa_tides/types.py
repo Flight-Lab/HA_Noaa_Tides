@@ -217,6 +217,15 @@ class CoordinatorData(TypedDict):
     conductivity: NotRequired[SensorData]
 
 
+class CompositeSensorGroupsType(TypedDict):
+    """Type for defining composite sensor relationships."""
+
+    wind_direction: list[str]
+    wind_speed: list[str]
+    currents_direction: list[str]
+    currents_speed: list[str]
+
+
 @dataclass(frozen=True)
 class NoaaTidesSensorEntityDescription(SensorEntityDescription):
     """Class describing NOAA Tides sensor entities."""
