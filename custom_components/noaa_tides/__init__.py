@@ -6,7 +6,6 @@ import logging
 from typing import Final
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.device_registry import DeviceEntryType, async_get
@@ -15,9 +14,6 @@ from . import const
 from .coordinator import NoaaTidesDataUpdateCoordinator
 
 _LOGGER: Final = logging.getLogger(__name__)
-
-# Define platforms
-PLATFORMS: Final[list[Platform]] = [Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -32,6 +28,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     Raises:
         ConfigEntryNotReady: If initial data fetch fails
+
     """
     # Create coordinator with proper type hints
     coordinator = NoaaTidesDataUpdateCoordinator(
@@ -74,7 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     # Set up platforms first so entities are ready for the data
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, const.PLATFORMS)
 
     # Now fetch initial data
     await coordinator.async_refresh()
@@ -99,6 +96,7 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     Args:
         hass: The HomeAssistant instance
         entry: The ConfigEntry being updated
+
     """
     # Force an immediate reload of the entry when options change
     await hass.config_entries.async_reload(entry.entry_id)
@@ -113,9 +111,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     Returns:
         bool: True if unload was successful, False otherwise
+
     """
     # Unload platforms
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, const.PLATFORMS)
 
     # Remove config entry from domain data
     if unload_ok:
@@ -133,6 +132,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     Returns:
         bool: True if migration was successful, False otherwise
+
     """
     _LOGGER.debug("Migrating from version %s", entry.version)
 
