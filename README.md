@@ -1,7 +1,8 @@
 # NOAA Tides Integration for Home Assistant
 
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+<!--[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)--> 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 A custom component for Home Assistant that provides real-time tidal, current, and environmental data from NOAA's Center for Operational Oceanographic Products and Services (CO-OPS) API and the National Data Buoy Center (NDBC) API. This component enhances and extends the functionality of the [legacy NOAA Tides core component](https://www.home-assistant.io/integrations/noaa_tides/), offering UI configurability, automatic sensor detection, and enhanced data handling.
 
