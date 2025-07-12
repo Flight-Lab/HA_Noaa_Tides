@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, NotRequired, Optional, TypedDict
+from typing import Any, Literal, NotRequired
 
 from homeassistant.components.sensor import SensorEntityDescription
 
@@ -22,7 +22,7 @@ DataSectionType = Literal["Meteorological", "Spectral Wave", "Ocean Current"]
 
 
 # API Endpoint Types
-class NoaaApiEndpoints(TypedDict):
+class NoaaApiEndpoints(dict[str, str]):
     """NOAA API endpoint configuration."""
 
     base_url: str
@@ -31,7 +31,7 @@ class NoaaApiEndpoints(TypedDict):
     data_url: str
 
 
-class NdbcApiEndpoints(TypedDict):
+class NdbcApiEndpoints(dict[str, str]):
     """NDBC API endpoint configuration."""
 
     base_url: str
@@ -41,19 +41,19 @@ class NdbcApiEndpoints(TypedDict):
 
 
 # NOAA API Response Types
-class NoaaProductResponse(TypedDict):
+class NoaaProductResponse(dict[str, Any]):
     """NOAA product response type."""
 
     products: list[dict[str, Any]]
 
 
-class NoaaSensorResponse(TypedDict):
+class NoaaSensorResponse(dict[str, Any]):
     """NOAA sensor response type."""
 
     sensors: list[dict[str, Any]]
 
 
-class NoaaApiResponse(TypedDict):
+class NoaaApiResponse(dict[str, Any]):
     """Type for NOAA API response."""
 
     data: list[dict[str, Any]]
@@ -61,7 +61,7 @@ class NoaaApiResponse(TypedDict):
 
 
 # Sensor Data Types
-class BaseSensorAttributes(TypedDict):
+class BaseSensorAttributes(dict[str, Any]):
     """Base attributes shared by all sensors."""
 
     time: NotRequired[str]
@@ -90,7 +90,7 @@ class WaterLevelAttributes(BaseSensorAttributes):
     datum: str
 
 
-class SensorData(TypedDict):
+class SensorData(dict[str, Any]):
     """Type for sensor data."""
 
     state: float | str
@@ -98,7 +98,7 @@ class SensorData(TypedDict):
 
 
 # Tide Prediction Types
-class TidePrediction(TypedDict):
+class TidePrediction(dict[str, Any]):
     """Type for tide prediction data."""
 
     time: datetime
@@ -106,7 +106,7 @@ class TidePrediction(TypedDict):
     level: float
 
 
-class TidePredictionAttributes(TypedDict):
+class TidePredictionAttributes(dict[str, Any]):
     """Type for tide prediction attributes."""
 
     next_tide_type: Literal["High", "Low"]
@@ -122,14 +122,14 @@ class TidePredictionAttributes(TypedDict):
     tide_percentage: float
 
 
-class TidePredictionData(TypedDict):
+class TidePredictionData(dict[str, Any]):
     """Type for complete tide prediction data."""
 
     state: str
     attributes: TidePredictionAttributes
 
 
-class CurrentsPredictionData(TypedDict):
+class CurrentsPredictionData(dict[str, Any]):
     """Type for complete currents prediction data."""
 
     state: Literal["ebb", "slack", "flood"]
@@ -167,7 +167,7 @@ class NdbcCurrentAttributes(BaseSensorAttributes):
     unit: str
 
 
-class NdbcHeaderData(TypedDict):
+class NdbcHeaderData(dict[str, str]):
     """NDBC header data type."""
 
     WDIR: str
@@ -186,7 +186,7 @@ class NdbcHeaderData(TypedDict):
 
 
 # Config Flow Types
-class ConfigFlowData(TypedDict):
+class ConfigFlowData(dict[str, Any]):
     """Config flow data type."""
 
     name: str
@@ -201,7 +201,7 @@ class ConfigFlowData(TypedDict):
 
 
 # Coordinator Data Type
-class CoordinatorData(TypedDict):
+class CoordinatorData(dict[str, Any]):
     """Type for coordinator data."""
 
     tide_predictions: NotRequired[TidePredictionData]
@@ -217,7 +217,7 @@ class CoordinatorData(TypedDict):
     conductivity: NotRequired[SensorData]
 
 
-class CompositeSensorGroupsType(TypedDict):
+class CompositeSensorGroupsType(dict[str, list[str]]):
     """Type for defining composite sensor relationships."""
 
     wind_direction: list[str]
@@ -241,5 +241,5 @@ class ApiError:
 
     code: str
     message: str
-    technical_detail: Optional[str] = None
-    help_url: Optional[str] = None
+    technical_detail: str | None = None
+    help_url: str | None = None
