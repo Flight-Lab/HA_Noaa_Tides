@@ -8,12 +8,14 @@ from typing import Any, Final
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import const
 from .coordinator import NoaaTidesDataUpdateCoordinator
+from .data_constants import LogMessages
 from .sensors import NDBC_SENSOR_TYPES, NOAA_SENSOR_TYPES
 from .types import (
     BaseSensorAttributes,
@@ -33,8 +35,17 @@ async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
-) -> bool:
-    """Set up NOAA Tides sensors based on a config entry."""
+) -> None:
+    """Set up NOAA Tides sensors based on a config entry.
+    
+    Args:
+        hass: The HomeAssistant instance
+        entry: The ConfigEntry to set up
+        async_add_entities: Callback to add entities
+        
+    Raises:
+        ConfigEntryNotReady: If sensor setup fails
+    """
     coordinator: NoaaTidesDataUpdateCoordinator = hass.data[const.DOMAIN][
         entry.entry_id
     ]
@@ -65,23 +76,23 @@ async def async_setup_entry(
             )
         else:
             _LOGGER.warning(
-                "Selected sensor '%s' not found in sensor types for %s. Skipping.",
-                sensor_id,
-                "NOAA station"
-                if coordinator.hub_type == const.HUB_TYPE_NOAA
-                else "NDBC buoy",
+                f"Selected sensor '{sensor_id}' not found in sensor types for "
+                f"{'NOAA station' if coordinator.hub_type == const.HUB_TYPE_NOAA else 'NDBC buoy'}. Skipping."
             )
 
     if entities:
         async_add_entities(entities)
-        _LOGGER.debug("Set up %d sensors for %s", len(entities), coordinator.station_id)
-    else:
-        _LOGGER.warning(
-            "No sensors were set up for %s. Check configuration.",
-            coordinator.station_id,
+        _LOGGER.debug(
+            LogMessages.SENSORS_DISCOVERED.format(
+                source_type="NOAA Station" if coordinator.hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
+                source_id=coordinator.station_id,
+                sensor_count=len(entities)
+            )
         )
-
-    return True
+    else:
+        error_msg = f"No sensors were set up for {coordinator.station_id}. Check configuration."
+        _LOGGER.error(error_msg)
+        raise ConfigEntryNotReady(error_msg)
 
 
 class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorEntity):
@@ -176,13 +187,9 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
                         self._attr_native_value = float(self._attr_native_value)
                     except (ValueError, TypeError):
                         _LOGGER.debug(
-                            "%s %s: Could not convert value '%s' to float for sensor %s",
-                            "NOAA Station"
-                            if self.coordinator.hub_type == const.HUB_TYPE_NOAA
-                            else "NDBC Buoy",
-                            self.coordinator.station_id,
-                            self._attr_native_value,
-                            self.entity_description.key,
+                            f"{'NOAA Station' if self.coordinator.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} "
+                            f"{self.coordinator.station_id}: Could not convert value '{self._attr_native_value}' "
+                            f"to float for sensor {self.entity_description.key}"
                         )
                         # Keep the original value
 
@@ -211,12 +218,9 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
             return sensor_data.state is not None
         except AttributeError:
             _LOGGER.debug(
-                "%s %s: Sensor data for %s does not have a state attribute",
-                "NOAA Station"
-                if self.coordinator.hub_type == const.HUB_TYPE_NOAA
-                else "NDBC Buoy",
-                self.coordinator.station_id,
-                self.entity_description.key,
+                f"{'NOAA Station' if self.coordinator.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} "
+                f"{self.coordinator.station_id}: Sensor data for {self.entity_description.key} "
+                f"does not have a state attribute"
             )
             return False
 
@@ -236,12 +240,9 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
                             return True
                     except AttributeError:
                         _LOGGER.debug(
-                            "%s %s: Related sensor data for %s does not have a state attribute",
-                            "NOAA Station"
-                            if self.coordinator.hub_type == const.HUB_TYPE_NOAA
-                            else "NDBC Buoy",
-                            self.coordinator.station_id,
-                            related_sensor,
+                            f"{'NOAA Station' if self.coordinator.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} "
+                            f"{self.coordinator.station_id}: Related sensor data for {related_sensor} "
+                            f"does not have a state attribute"
                         )
                         continue
         return False
