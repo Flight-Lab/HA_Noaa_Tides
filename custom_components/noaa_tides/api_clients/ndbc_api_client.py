@@ -10,16 +10,23 @@ from typing import Any, Final
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
+from ..api_constants import get_ndbc_current_url, get_ndbc_meteo_url, get_ndbc_spec_url, INVALID_DATA_VALUES
 from ..const import (
     DATA_METEOROLOGICAL,
     DATA_OCEAN_CURRENT,
     DATA_SECTIONS,
     DATA_SPECTRAL_WAVE,
-    NDBC_CURRENT_URL,
-    NDBC_METEO_URL,
-    NDBC_SPEC_URL,
     UNIT_IMPERIAL,
     UNIT_METRIC,
+)
+from ..data_constants import (
+    DECIMAL_PRECISION,
+    HPA_TO_INHG_FACTOR,
+    METERS_TO_FEET_FACTOR,
+    MIN_CURRENT_DATA_LINES,
+    MIN_METEO_DATA_LINES,
+    MIN_WAVE_DATA_LINES,
+    MS_TO_MPH_FACTOR,
 )
 from ..errors import ApiError
 from ..types import CoordinatorData
@@ -79,9 +86,7 @@ class NdbcApiClient(BaseApiClient):
             # Only fetch from sections with active sensors
             required_sections = determine_required_data_sections(selected_sensors)
             _LOGGER.debug(
-                "NDBC Buoy %s: Fetching from required data sections: %s",
-                self.station_id,
-                required_sections,
+                f"NDBC Buoy {self.station_id}: Fetching from required data sections: {required_sections}"
             )
 
             # Create tasks only for required sections
@@ -105,10 +110,7 @@ class NdbcApiClient(BaseApiClient):
                         data.update(section_data)
                 except Exception as err:
                     _LOGGER.error(
-                        "NDBC Buoy %s: Error processing data: %s (%s)",
-                        self.station_id,
-                        str(err),
-                        type(err).__name__,
+                        f"NDBC Buoy {self.station_id}: Error processing data: {err} ({type(err).__name__})"
                     )
 
             return data
@@ -126,13 +128,13 @@ class NdbcApiClient(BaseApiClient):
 
         """
         try:
-            url = NDBC_METEO_URL.format(buoy_id=self.station_id)
+            url = get_ndbc_meteo_url(self.station_id)
             text = await self._safe_request_with_retry_text(
                 url, operation="fetching meteorological data"
             )
             lines = text.strip().split("\n")
 
-            if len(lines) < 3:  # Need header, units, and at least one data line
+            if len(lines) < MIN_METEO_DATA_LINES:  # Need header, units, and at least one data line
                 return {}
 
             headers = lines[0].strip().split()
@@ -143,43 +145,39 @@ class NdbcApiClient(BaseApiClient):
             for i, header in enumerate(headers):
                 sensor_id = f"meteo_{header.lower()}"
                 try:
-                    if i < len(data) and data[i] != "MM" and data[i] != "999":
+                    if i < len(data) and data[i] not in INVALID_DATA_VALUES:
                         # Store original value before conversion
                         original_value = float(data[i])
-                        # Round original value to 2 decimal places
-                        value = round(original_value, 2)
+                        # Round original value to standard precision
+                        value = round(original_value, DECIMAL_PRECISION)
 
                         # Initialize attributes
                         attributes: dict[str, Any] = {
                             "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
                         }
 
-                        # Convert values if imperial units are requested
+                        # Apply unit conversions for imperial system (skip temperature - HA handles it)
                         if self.unit_system == UNIT_IMPERIAL:
-                            # Temperature conversions (ATMP, WTMP, DEWP) - Celsius to Fahrenheit
-                            if header in ["ATMP", "WTMP", "DEWP"]:
-                                value = round((value * 9 / 5) + 32, 2)
-                                # Store original value and unit for reference
-                                attributes["raw_value"] = str(original_value)
-                                attributes["unit"] = "°C"
-
                             # Wind speed and gust conversions (WSPD, GST) - m/s to mph
-                            elif header in ["WSPD", "GST"]:
-                                value = round(value * 2.23694, 2)
+                            if header in ["WSPD", "GST"]:
+                                value = round(value * MS_TO_MPH_FACTOR, DECIMAL_PRECISION)
                                 attributes["raw_value"] = str(original_value)
                                 attributes["unit"] = "m/s"
 
                             # Wave height conversion (WVHT) - meters to feet
                             elif header == "WVHT":
-                                value = round(value * 3.28084, 2)
+                                value = round(value * METERS_TO_FEET_FACTOR, DECIMAL_PRECISION)
                                 attributes["raw_value"] = str(original_value)
                                 attributes["unit"] = "m"
 
                             # Pressure conversion (PRES) - hPa to inHg
                             elif header == "PRES":
-                                value = round(value * 0.02953, 2)
+                                value = round(value * HPA_TO_INHG_FACTOR, DECIMAL_PRECISION)
                                 attributes["raw_value"] = str(original_value)
                                 attributes["unit"] = "hPa"
+
+                            # Temperature sensors: REMOVE manual conversion - let HA handle it
+                            # Note: ATMP, WTMP, DEWP will use native Celsius values
 
                         # Add direction cardinal for direction measurements
                         if header in ["WDIR", "MWD"]:  # Direction sensors
@@ -193,10 +191,8 @@ class NdbcApiClient(BaseApiClient):
                         }
                 except (ValueError, IndexError):
                     _LOGGER.debug(
-                        "Buoy %s: Invalid data for sensor %s: %s",
-                        self.station_id,
-                        sensor_id,
-                        data[i] if i < len(data) else "missing",
+                        f"Buoy {self.station_id}: Invalid data for sensor {sensor_id}: "
+                        f"{data[i] if i < len(data) else 'missing'}"
                     )
                     continue
 
@@ -206,10 +202,7 @@ class NdbcApiClient(BaseApiClient):
             return {}
         except Exception as err:
             _LOGGER.error(
-                "NDBC Buoy %s: Error fetching NDBC meteorological data: %s (%s)",
-                self.station_id,
-                str(err),
-                type(err).__name__,
+                f"NDBC Buoy {self.station_id}: Error fetching NDBC meteorological data: {err} ({type(err).__name__})"
             )
             return {}
 
@@ -221,16 +214,15 @@ class NdbcApiClient(BaseApiClient):
 
         """
         try:
-            url = NDBC_SPEC_URL.format(buoy_id=self.station_id)
+            url = get_ndbc_spec_url(self.station_id)
             text = await self._safe_request_with_retry_text(
                 url, operation="fetching spectral wave data"
             )
             lines = text.strip().split("\n")
 
-            if len(lines) < 3:  # Need header, units, and at least one data line
+            if len(lines) < MIN_WAVE_DATA_LINES:  # Need header, units, and at least one data line
                 _LOGGER.warning(
-                    "NDBC Buoy %s: Insufficient data in spectral wave response",
-                    self.station_id,
+                    f"NDBC Buoy {self.station_id}: Insufficient data in spectral wave response"
                 )
                 return {}
 
@@ -243,21 +235,15 @@ class NdbcApiClient(BaseApiClient):
                 sensor_id = f"spec_wave_{header.lower()}"
 
                 try:
-                    if i < len(data) and data[i] not in [
-                        "MM",
-                        "999",
-                        "999.0",
-                        "",
-                        "N/A",
-                    ]:
-                        # Round initial value to 2 decimal places
-                        value = round(float(data[i]), 2)
+                    if i < len(data) and data[i] not in INVALID_DATA_VALUES:
+                        # Round initial value to standard precision
+                        value = round(float(data[i]), DECIMAL_PRECISION)
 
                         # Convert values if imperial units are requested
                         if self.unit_system == UNIT_IMPERIAL:
                             # Wave height conversions (WVHT, SwH, WWH) - meters to feet
                             if header in ["WVHT", "SwH", "WWH"]:
-                                value = round(value * 3.28084, 2)
+                                value = round(value * METERS_TO_FEET_FACTOR, DECIMAL_PRECISION)
 
                         # Initialize empty attributes dictionary
                         attributes = {}
@@ -269,7 +255,7 @@ class NdbcApiClient(BaseApiClient):
                                 attributes["direction_cardinal"] = cardinal
                         elif header in ["WVHT", "SwH", "WWH"]:
                             # Store the original (unconverted) value and unit
-                            attributes["raw_value"] = str(round(float(data[i]), 2))
+                            attributes["raw_value"] = str(round(float(data[i]), DECIMAL_PRECISION))
                             attributes["unit"] = units[i] if i < len(units) else None
 
                         result[sensor_id] = {
@@ -278,17 +264,13 @@ class NdbcApiClient(BaseApiClient):
                         }
                 except (ValueError, IndexError):
                     _LOGGER.debug(
-                        "NDBC Buoy %s: Invalid data for sensor %s: %s",
-                        self.station_id,
-                        sensor_id,
-                        data[i] if i < len(data) else "missing",
+                        f"NDBC Buoy {self.station_id}: Invalid data for sensor {sensor_id}: "
+                        f"{data[i] if i < len(data) else 'missing'}"
                     )
                     continue
 
             _LOGGER.debug(
-                "NDBC Buoy %s: Spectral wave sensors processed: %s",
-                self.station_id,
-                list(result.keys()),
+                f"NDBC Buoy {self.station_id}: Spectral wave sensors processed: {list(result.keys())}"
             )
             return result
 
@@ -296,10 +278,7 @@ class NdbcApiClient(BaseApiClient):
             return {}
         except Exception as err:
             _LOGGER.error(
-                "NDBC Buoy %s: Error processing spectral wave data: %s (%s)",
-                self.station_id,
-                str(err),
-                type(err).__name__,
+                f"NDBC Buoy {self.station_id}: Error processing spectral wave data: {err} ({type(err).__name__})"
             )
             return {}
 
@@ -313,7 +292,7 @@ class NdbcApiClient(BaseApiClient):
 
         """
         try:
-            url = NDBC_CURRENT_URL.format(buoy_id=self.station_id)
+            url = get_ndbc_current_url(self.station_id)
 
             try:
                 text = await self._safe_request_with_retry_text(
@@ -323,8 +302,8 @@ class NdbcApiClient(BaseApiClient):
                 # For this method only, a 404 is expected for buoys without current sensors
                 if "404" in str(err):
                     _LOGGER.debug(
-                        "NDBC Buoy %s: Ocean current data not available - this is normal as not all buoys have current sensors",
-                        self.station_id,
+                        f"NDBC Buoy {self.station_id}: Ocean current data not available - "
+                        f"this is normal as not all buoys have current sensors"
                     )
                     return {}
                 # For other errors, re-raise to be caught by the outer try/except
@@ -332,15 +311,14 @@ class NdbcApiClient(BaseApiClient):
 
             lines = text.strip().split("\n")
 
-            if len(lines) < 2:  # Need header and at least one data line
+            if len(lines) < MIN_CURRENT_DATA_LINES:  # Need header and at least one data line
                 _LOGGER.debug(
-                    "NDBC Buoy %s: Insufficient ocean current data in response",
-                    self.station_id,
+                    f"NDBC Buoy {self.station_id}: Insufficient ocean current data in response"
                 )
                 return {}
 
             headers = lines[0].strip().split()
-            # Get recent data lines for validation
+            # Get recent data lines for validation (limit to prevent infinite loops)
             data_lines = [line.strip().split() for line in lines[1:6]]
 
             result = {}
@@ -356,7 +334,7 @@ class NdbcApiClient(BaseApiClient):
                     try:
                         if (
                             i < len(data_line)
-                            and data_line[i] not in ["MM", "999", "999.0", "", "N/A"]
+                            and data_line[i] not in INVALID_DATA_VALUES
                             and float(data_line[i])
                         ):
                             valid_readings = True
@@ -385,9 +363,7 @@ class NdbcApiClient(BaseApiClient):
                     }
 
             _LOGGER.debug(
-                "NDBC Buoy %s: Ocean current sensors processed: %s",
-                self.station_id,
-                list(result.keys()),
+                f"NDBC Buoy {self.station_id}: Ocean current sensors processed: {list(result.keys())}"
             )
             return result
 
@@ -395,9 +371,6 @@ class NdbcApiClient(BaseApiClient):
             return {}
         except Exception as err:
             _LOGGER.error(
-                "NDBC Buoy %s: Error processing ocean current data: %s (%s)",
-                self.station_id,
-                str(err),
-                type(err).__name__,
+                f"NDBC Buoy {self.station_id}: Error processing ocean current data: {err} ({type(err).__name__})"
             )
             return {}
