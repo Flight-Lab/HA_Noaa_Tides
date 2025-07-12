@@ -78,10 +78,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not coordinator.last_update_success:
         # Remove the config entry from domain data if initial refresh failed
         hass.data[const.DOMAIN].pop(entry.entry_id)
+        source_type = (
+            "NOAA station" if entry.data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA 
+            else "NDBC buoy"
+        )
         raise ConfigEntryNotReady(
-            f"Failed to fetch initial data from "
-            f"{'NOAA station' if entry.data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA else 'NDBC buoy'} "
-            f"{coordinator.station_id}"
+            f"Failed to fetch initial data from {source_type} {coordinator.station_id}"
         )
 
     # Register update listener for config entry changes
@@ -134,7 +136,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         bool: True if migration was successful, False otherwise
 
     """
-    _LOGGER.debug("Migrating from version %s", entry.version)
+    _LOGGER.debug(f"Migrating from version {entry.version}")
 
     if entry.version == 1:
         # Currently no migrations needed
