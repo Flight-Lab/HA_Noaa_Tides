@@ -80,23 +80,13 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         icon="mdi:compass",
         is_ndbc=True,
     ),
+    # Temperature sensors: Always use Celsius - HA will handle conversion automatically
     "meteo_wtmp": NoaaTidesSensorEntityDescription(
         key="meteo_wtmp",
         name="Water Temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
-        unit_metric=UnitOfTemperature.CELSIUS,
-        unit_imperial=UnitOfTemperature.FAHRENHEIT,
-        is_ndbc=True,
-    ),
-    # Adding the missing meteorological sensors
-    "meteo_pres": NoaaTidesSensorEntityDescription(
-        key="meteo_pres",
-        name="Barometric Pressure",
-        device_class=SensorDeviceClass.PRESSURE,
-        state_class=SensorStateClass.MEASUREMENT,
-        unit_metric=UnitOfPressure.HPA,
-        unit_imperial=UnitOfPressure.INHG,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,  # HA handles conversion
         is_ndbc=True,
     ),
     "meteo_atmp": NoaaTidesSensorEntityDescription(
@@ -104,8 +94,7 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         name="Air Temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
-        unit_metric=UnitOfTemperature.CELSIUS,
-        unit_imperial=UnitOfTemperature.FAHRENHEIT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,  # HA handles conversion
         is_ndbc=True,
     ),
     "meteo_dewp": NoaaTidesSensorEntityDescription(
@@ -113,8 +102,17 @@ NDBC_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
         name="Dew Point",
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
-        unit_metric=UnitOfTemperature.CELSIUS,
-        unit_imperial=UnitOfTemperature.FAHRENHEIT,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,  # HA handles conversion
+        is_ndbc=True,
+    ),
+    # Non-temperature sensors with manual conversion
+    "meteo_pres": NoaaTidesSensorEntityDescription(
+        key="meteo_pres",
+        name="Barometric Pressure",
+        device_class=SensorDeviceClass.PRESSURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit_metric=UnitOfPressure.HPA,
+        unit_imperial=UnitOfPressure.INHG,
         is_ndbc=True,
     ),
     "meteo_ptdy": NoaaTidesSensorEntityDescription(
