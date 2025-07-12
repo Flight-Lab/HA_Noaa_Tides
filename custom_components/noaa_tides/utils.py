@@ -18,6 +18,19 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import const
+from .api_constants import (
+    get_ndbc_current_url,
+    get_ndbc_meteo_url,
+    get_ndbc_spec_url,
+    get_noaa_products_url,
+    get_noaa_sensors_url,
+    INVALID_DATA_VALUES,
+)
+from .data_constants import (
+    CARDINAL_DIRECTION_STEP,
+    MAX_DATA_LINES_TO_CHECK,
+    LogMessages,
+)
 from .types import (
     HubType,
     NoaaProductResponse,
@@ -51,7 +64,7 @@ async def validate_data_source(
 
         # NOAA Station validation
         if hub_type == const.HUB_TYPE_NOAA:
-            url = const.NOAA_PRODUCTS_URL.format(station_id=source_id)
+            url = get_noaa_products_url(source_id)
             async with session.get(url) as response:
                 if response.status != 200:
                     return False
@@ -68,11 +81,11 @@ async def validate_data_source(
             # Create validation tasks based on selected data sections
             for section in selected_sections:
                 if section == const.DATA_METEOROLOGICAL:
-                    url = const.NDBC_METEO_URL.format(buoy_id=source_id)
+                    url = get_ndbc_meteo_url(source_id)
                 elif section == const.DATA_SPECTRAL_WAVE:
-                    url = const.NDBC_SPEC_URL.format(buoy_id=source_id)
+                    url = get_ndbc_spec_url(source_id)
                 elif section == const.DATA_OCEAN_CURRENT:
-                    url = const.NDBC_CURRENT_URL.format(buoy_id=source_id)
+                    url = get_ndbc_current_url(source_id)
                 else:
                     continue
 
@@ -93,10 +106,7 @@ async def validate_data_source(
             for response in responses:
                 if isinstance(response, Exception):
                     _LOGGER.debug(
-                        "NDBC Buoy %s: Error checking data: %s (%s)",
-                        source_id,
-                        str(response),
-                        type(response).__name__,
+                        f"NDBC Buoy {source_id}: Error checking data: {response} ({type(response).__name__})"
                     )
                     continue
 
@@ -107,10 +117,7 @@ async def validate_data_source(
                             valid_responses += 1
                     except Exception as err:
                         _LOGGER.debug(
-                            "NDBC Buoy %s: Error reading response: %s (%s)",
-                            source_id,
-                            str(err),
-                            type(err).__name__,
+                            f"NDBC Buoy {source_id}: Error reading response: {err} ({type(err).__name__})"
                         )
                         continue
 
@@ -118,11 +125,8 @@ async def validate_data_source(
 
     except Exception as err:
         _LOGGER.error(
-            "%s %s: Error validating: %s (%s)",
-            "NOAA Station" if hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
-            source_id,
-            str(err),
-            type(err).__name__,
+            f"{'NOAA Station' if hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} {source_id}: "
+            f"Error validating: {err} ({type(err).__name__})"
         )
         return False
 
@@ -142,7 +146,7 @@ async def validate_noaa_station(hass: HomeAssistant, station_id: str) -> bool:
 
 
 async def validate_ndbc_buoy(
-    hass: HomeAssistant, buoy_id: str, data_sections: list[str] = None
+    hass: HomeAssistant, buoy_id: str, data_sections: list[str] | None = None
 ) -> bool:
     """Validate an NDBC buoy ID by checking the specified data sections.
 
@@ -157,7 +161,7 @@ async def validate_ndbc_buoy(
     """
     # Always check all sections regardless of what was passed
     all_sections = list(const.DATA_SECTIONS)
-    _LOGGER.debug("NDBC Buoy %s: Validating buoy ID with all data sections", buoy_id)
+    _LOGGER.debug(f"NDBC Buoy {buoy_id}: Validating buoy ID with all data sections")
     return await validate_data_source(hass, buoy_id, const.HUB_TYPE_NDBC, all_sections)
 
 
@@ -190,10 +194,7 @@ def _deduplicate_overlapping_sensors(sensors: dict[str, str]) -> dict[str, str]:
 
             result.pop(meteo_sensor)
             _LOGGER.debug(
-                "Preferring %s over %s for %s measurement",
-                spec_sensor,
-                meteo_sensor,
-                sensor_type,
+                f"Preferring {spec_sensor} over {meteo_sensor} for {sensor_type} measurement"
             )
 
     return result
@@ -231,14 +232,14 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
         dict[str, str]: Dictionary mapping sensor keys to display names
 
     """
-    _LOGGER.debug("NOAA Station %s: Starting NOAA sensor discovery", station_id)
+    _LOGGER.debug(f"NOAA Station {station_id}: Starting NOAA sensor discovery")
     try:
         session = async_get_clientsession(hass)
         sensors: dict[str, str] = {}
 
         # Create tasks for both endpoints
-        products_url = const.NOAA_PRODUCTS_URL.format(station_id=station_id)
-        sensors_url = const.NOAA_SENSORS_URL.format(station_id=station_id)
+        products_url = get_noaa_products_url(station_id)
+        sensors_url = get_noaa_sensors_url(station_id)
 
         async with asyncio.TaskGroup() as tg:
             products_task = tg.create_task(session.get(products_url))
@@ -250,13 +251,13 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
                 NoaaProductResponse, await products_task.result().json()
             )
             products = products_data.get("products", [])
-            _LOGGER.debug("NOAA Station %s: Found products: %s", station_id, products)
+            _LOGGER.debug(f"NOAA Station {station_id}: Found products: {products}")
 
             # Map product names to sensors
             for product in products:
                 name = product.get("name", "").lower()
                 _LOGGER.debug(
-                    "NOAA Station %s: Processing product name: %s", station_id, name
+                    f"NOAA Station {station_id}: Processing product name: {name}"
                 )
 
                 if "water levels" in name:
@@ -277,15 +278,13 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
                 )
                 available_sensors = sensors_data.get("sensors", [])
                 _LOGGER.debug(
-                    "NOAA Station %s: Raw sensors data: %s", station_id, sensors_data
+                    f"NOAA Station {station_id}: Raw sensors data: {sensors_data}"
                 )
 
                 for sensor in available_sensors:
                     sensor_name = sensor.get("name", "").lower()
                     _LOGGER.debug(
-                        "NOAA Station %s: Found NOAA sensor name: %s",
-                        station_id,
-                        sensor_name,
+                        f"NOAA Station {station_id}: Found NOAA sensor name: {sensor_name}"
                     )
 
                     # Map sensor names to our sensors
@@ -305,23 +304,21 @@ async def discover_noaa_sensors(hass: HomeAssistant, station_id: str) -> dict[st
 
             except Exception as err:
                 _LOGGER.debug(
-                    "NOAA Station %s: Error processing sensors data: %s (%s)",
-                    station_id,
-                    str(err),
-                    type(err).__name__,
+                    f"NOAA Station {station_id}: Error processing sensors data: {err} ({type(err).__name__})"
                 )
 
         _LOGGER.debug(
-            "NOAA Station %s: Final discovered sensors: %s", station_id, sensors
+            LogMessages.SENSORS_DISCOVERED.format(
+                source_type="NOAA Station",
+                source_id=station_id,
+                sensor_count=len(sensors)
+            )
         )
         return sensors
 
     except Exception as err:
         _LOGGER.error(
-            "NOAA Station %s: Error discovering sensors: %s (%s)",
-            station_id,
-            str(err),
-            type(err).__name__,
+            f"NOAA Station {station_id}: Error discovering sensors: {err} ({type(err).__name__})"
         )
         return {}
 
@@ -363,7 +360,7 @@ async def discover_ndbc_sensors(
 
         for section in data_sections:
             if section == const.DATA_METEOROLOGICAL:
-                url = const.NDBC_METEO_URL.format(buoy_id=buoy_id)
+                url = get_ndbc_meteo_url(buoy_id)
                 async with session.get(url) as response:
                     if response.status == 200:
                         text = await response.text()
@@ -374,8 +371,8 @@ async def discover_ndbc_sensors(
                             headers = lines[0].strip().split()
                             units = lines[1].strip().split()  # Skip units line
 
-                            # Get actual data lines, skipping headers and units
-                            data_lines = [line.strip().split() for line in lines[2:12]]
+                            # Get actual data lines, skipping headers and units (limit to prevent infinite loops)
+                            data_lines = [line.strip().split() for line in lines[2:MAX_DATA_LINES_TO_CHECK]]
 
                             for i, header in enumerate(headers):
                                 if header in meteo_mapping:
@@ -385,9 +382,7 @@ async def discover_ndbc_sensors(
                                         try:
                                             if (
                                                 i < len(data_line)
-                                                and data_line[i] != "MM"
-                                                and data_line[i] != "999.0"
-                                                and data_line[i] != "999"
+                                                and data_line[i] not in INVALID_DATA_VALUES
                                                 and float(data_line[i])
                                             ):  # Verify it's a valid number
                                                 valid_readings = True
@@ -396,23 +391,15 @@ async def discover_ndbc_sensors(
                                             continue
 
                                     _LOGGER.debug(
-                                        "NDBC Buoy %s: Checking sensor %s: valid_readings=%s, first_value=%s",
-                                        buoy_id,
-                                        header,
-                                        valid_readings,
-                                        data_lines[0][i]
-                                        if i < len(data_lines[0])
-                                        else "out of range",
+                                        f"NDBC Buoy {buoy_id}: Checking sensor {header}: valid_readings={valid_readings}, "
+                                        f"first_value={data_lines[0][i] if i < len(data_lines[0]) else 'out of range'}"
                                     )
 
                                     if valid_readings:
                                         sensor_id = f"meteo_{header.lower()}"
                                         sensors[sensor_id] = meteo_mapping[header]
                                         _LOGGER.debug(
-                                            "NDBC Buoy %s: Added sensor: %s -> %s",
-                                            buoy_id,
-                                            sensor_id,
-                                            meteo_mapping[header],
+                                            f"NDBC Buoy {buoy_id}: Added sensor: {sensor_id} -> {meteo_mapping[header]}"
                                         )
 
             elif section == const.DATA_SPECTRAL_WAVE:
@@ -430,14 +417,14 @@ async def discover_ndbc_sensors(
                     "MWD": "Mean Wave Direction",
                 }
 
-                url = const.NDBC_SPEC_URL.format(buoy_id=buoy_id)
+                url = get_ndbc_spec_url(buoy_id)
                 async with session.get(url) as response:
                     if response.status == 200:
                         text = await response.text()
                         lines = text.strip().split("\n")
                         if len(lines) >= 2:  # Need header and at least one data line
                             headers = lines[0].strip().split()
-                            # Get recent data lines for validation
+                            # Get recent data lines for validation (limit to prevent infinite loops)
                             data_lines = [line.strip().split() for line in lines[1:6]]
 
                             for i, header in enumerate(headers):
@@ -448,9 +435,7 @@ async def discover_ndbc_sensors(
                                         try:
                                             if (
                                                 i < len(data_line)
-                                                and data_line[i] != "MM"
-                                                and data_line[i] != "999.0"
-                                                and data_line[i] != "999"
+                                                and data_line[i] not in INVALID_DATA_VALUES
                                                 and float(data_line[i])
                                             ):
                                                 valid_readings = True
@@ -462,10 +447,8 @@ async def discover_ndbc_sensors(
                                         sensor_id = f"spec_wave_{header.lower()}"
                                         sensors[sensor_id] = wave_mapping[header]
                                         _LOGGER.debug(
-                                            "NDBC Buoy %s: Added spectral wave sensor: %s -> %s",
-                                            buoy_id,
-                                            sensor_id,
-                                            wave_mapping[header],
+                                            f"NDBC Buoy {buoy_id}: Added spectral wave sensor: "
+                                            f"{sensor_id} -> {wave_mapping[header]}"
                                         )
 
             elif section == const.DATA_OCEAN_CURRENT:
@@ -476,14 +459,14 @@ async def discover_ndbc_sensors(
                     "SPDD": "Current Speed",
                 }
 
-                url = const.NDBC_CURRENT_URL.format(buoy_id=buoy_id)
+                url = get_ndbc_current_url(buoy_id)
                 async with session.get(url) as response:
                     if response.status == 200:
                         text = await response.text()
                         lines = text.strip().split("\n")
                         if len(lines) >= 2:  # Need header and at least one data line
                             headers = lines[0].strip().split()
-                            # Get recent data lines for validation
+                            # Get recent data lines for validation (limit to prevent infinite loops)
                             data_lines = [line.strip().split() for line in lines[1:6]]
 
                             for i, header in enumerate(headers):
@@ -494,9 +477,7 @@ async def discover_ndbc_sensors(
                                         try:
                                             if (
                                                 i < len(data_line)
-                                                and data_line[i] != "MM"
-                                                and data_line[i] != "999.0"
-                                                and data_line[i] != "999"
+                                                and data_line[i] not in INVALID_DATA_VALUES
                                                 and float(data_line[i])
                                             ):
                                                 valid_readings = True
@@ -508,10 +489,8 @@ async def discover_ndbc_sensors(
                                         sensor_id = f"current_{header.lower()}"
                                         sensors[sensor_id] = current_mapping[header]
                                         _LOGGER.debug(
-                                            "NDBC Buoy %s: Added ocean current sensor: %s -> %s",
-                                            buoy_id,
-                                            sensor_id,
-                                            current_mapping[header],
+                                            f"NDBC Buoy {buoy_id}: Added ocean current sensor: "
+                                            f"{sensor_id} -> {current_mapping[header]}"
                                         )
 
         # Deduplicate overlapping sensors, preferring spectral wave over meteorological
@@ -519,21 +498,21 @@ async def discover_ndbc_sensors(
 
         if len(deduplicated_sensors) < len(sensors):
             _LOGGER.debug(
-                "NDBC Buoy %s: Deduplicated overlapping wave sensors for better accuracy",
-                buoy_id,
+                f"NDBC Buoy {buoy_id}: Deduplicated overlapping wave sensors for better accuracy"
             )
 
         _LOGGER.debug(
-            "NDBC Buoy %s: Final discovered sensors: %s", buoy_id, deduplicated_sensors
+            LogMessages.SENSORS_DISCOVERED.format(
+                source_type="NDBC Buoy",
+                source_id=buoy_id,
+                sensor_count=len(deduplicated_sensors)
+            )
         )
         return deduplicated_sensors
 
     except Exception as err:
         _LOGGER.error(
-            "NDBC Buoy %s: Error discovering sensors: %s (%s)",
-            buoy_id,
-            str(err),
-            type(err).__name__,
+            f"NDBC Buoy {buoy_id}: Error discovering sensors: {err} ({type(err).__name__})"
         )
         return {}
 
@@ -571,7 +550,7 @@ def degrees_to_cardinal(degrees: float | None) -> str | None:
     ]
 
     # Convert degrees to 0-15 range for array index
-    index = int((degrees + 11.25) / 22.5) % 16
+    index = int((degrees + 11.25) / CARDINAL_DIRECTION_STEP) % 16
     return directions[index]
 
 
@@ -582,6 +561,8 @@ def get_unit_for_sensor(
     sensor_id: str,
 ) -> str | None:
     """Get the appropriate unit for a sensor based on unit system and hub type.
+
+    Note: Temperature sensors no longer use this logic as HA handles conversion automatically.
 
     Args:
         sensor_description: The sensor entity description
@@ -605,15 +586,12 @@ def get_unit_for_sensor(
             else sensor_description.unit_imperial
         )
 
-    # For NDBC sensors
+    # For NDBC sensors (non-temperature conversions only)
     if sensor_description.is_ndbc:
         if unit_system == const.UNIT_IMPERIAL:
             # Wind speed conversions (WSPD, GST) - m/s to mph
             if sensor_id.endswith(("_wspd", "_gst")):
                 return UnitOfSpeed.MILES_PER_HOUR
-            # Temperature conversions (ATMP, WTMP, DEWP) - C to F
-            elif sensor_id.endswith(("_atmp", "_wtmp", "_dewp")):
-                return UnitOfTemperature.FAHRENHEIT
             # Wave height conversions (WVHT, SwH, WWH) - meters to feet
             elif sensor_id.endswith(("_wvht", "_swh", "_wwh")):
                 return UnitOfLength.FEET
@@ -622,6 +600,10 @@ def get_unit_for_sensor(
                 return UnitOfPressure.INHG
         elif sensor_id.endswith(("_wvht", "_swh", "_wwh")):
             return UnitOfLength.METERS
+
+        # Temperature sensors: Always return Celsius (HA handles conversion)
+        if sensor_id.endswith(("_atmp", "_wtmp", "_dewp")):
+            return UnitOfTemperature.CELSIUS
 
     # Default: use the native unit from the description
     return sensor_description.native_unit_of_measurement
