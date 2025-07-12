@@ -13,13 +13,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from ..const import DEFAULT_TIMEOUT
+from ..api_constants import DEFAULT_TIMEOUT, MAX_RETRY_ATTEMPTS, BASE_RETRY_DELAY
+from ..data_constants import ErrorCodes, LogMessages
 from ..error_utils import map_exception_to_error
 from ..errors import ApiError, NdbcApiError, NoaaApiError
 from ..types import CoordinatorData
 
 _LOGGER: Final = logging.getLogger(__name__)
-T = TypeVar("T")  # Generic type for return values
+T = TypeVar("T", bound=str | dict[str, Any])  # Generic type for return values
 
 
 class BaseApiClient:
@@ -98,7 +99,7 @@ class BaseApiClient:
         # Create a generic ApiError for unknown exceptions
         service_type = "NOAA Station" if self._is_noaa else "NDBC Buoy"
         return ApiError(
-            code="unknown_error",
+            code=ErrorCodes.UNKNOWN_ERROR,
             message=f"{service_type} {self.station_id}: An unexpected error occurred.",
             technical_detail=str(error),
         )
@@ -112,14 +113,8 @@ class BaseApiClient:
         """
         service_type = "NOAA Station" if self._is_noaa else "NDBC Buoy"
         _LOGGER.error(
-            "%s %s: %s (Code: %s)%s",
-            service_type,
-            self.station_id,
-            error.message,
-            error.code,
-            f" Technical details: {error.technical_detail}"
-            if error.technical_detail
-            else "",
+            f"{service_type} {self.station_id}: {error.message} (Code: {error.code})"
+            f"{f' Technical details: {error.technical_detail}' if error.technical_detail else ''}"
         )
 
     async def _safe_request(
@@ -247,20 +242,16 @@ class BaseApiClient:
 
         """
         attempts = 0
-        max_attempts = 3
-        base_wait_time = 2  # seconds
+        max_attempts = MAX_RETRY_ATTEMPTS
+        base_wait_time = BASE_RETRY_DELAY
 
         # Extract endpoint name for better logging
         endpoint = url.split("/")[-1] if "/" in url else url
         operation_with_endpoint = f"{operation} ({endpoint})"
 
         _LOGGER.debug(
-            "%s %s: Attempting %s, format=%s, method=%s",
-            "NOAA Station" if self._is_noaa else "NDBC Buoy",
-            self.station_id,
-            operation_with_endpoint,
-            response_format,
-            method,
+            f"{'NOAA Station' if self._is_noaa else 'NDBC Buoy'} {self.station_id}: "
+            f"Attempting {operation_with_endpoint}, format={response_format}, method={method}"
         )
 
         while attempts < max_attempts:
@@ -281,10 +272,11 @@ class BaseApiClient:
                     if response.status == 429:  # Rate limit
                         retry_after = int(response.headers.get("Retry-After", "60"))
                         _LOGGER.warning(
-                            "%s %s: Rate limited, retrying after %s seconds",
-                            "NOAA Station" if self._is_noaa else "NDBC Buoy",
-                            self.station_id,
-                            retry_after,
+                            LogMessages.RATE_LIMITED.format(
+                                source_type="NOAA Station" if self._is_noaa else "NDBC Buoy",
+                                source_id=self.station_id,
+                                delay=retry_after
+                            )
                         )
                         await asyncio.sleep(retry_after)
                         attempts += 1
@@ -313,13 +305,8 @@ class BaseApiClient:
                 # Calculate wait time with exponential backoff and jitter
                 wait_time = base_wait_time**attempts + random.uniform(0, 1)
                 _LOGGER.debug(
-                    "%s %s: Connection error, retrying in %.1f seconds (%d/%d): %s",
-                    "NOAA Station" if self._is_noaa else "NDBC Buoy",
-                    self.station_id,
-                    wait_time,
-                    attempts,
-                    max_attempts,
-                    str(err),
+                    f"{'NOAA Station' if self._is_noaa else 'NDBC Buoy'} {self.station_id}: "
+                    f"Connection error, retrying in {wait_time:.1f} seconds ({attempts}/{max_attempts}): {err}"
                 )
                 await asyncio.sleep(wait_time)
 
@@ -342,4 +329,6 @@ class BaseApiClient:
                 raise UpdateFailed(
                     f"{api_error.message} ({operation_with_endpoint})"
                 ) from err
-        return None
+        
+        # This should never be reached due to the exception handling above
+        raise RuntimeError("Request retry loop completed without return or exception")
