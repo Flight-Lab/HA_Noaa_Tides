@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from . import const
 from .api_clients import NoaaApiClient, NdbcApiClient
+from .data_constants import MAX_CONSECUTIVE_FAILURES, LogMessages
 from .errors import NoaaApiError, NdbcApiError, ApiError
 from .types import CoordinatorData
 from .utils import determine_required_data_sections
@@ -63,9 +64,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 selected_sensors
             )
             _LOGGER.debug(
-                "NDBC Buoy %s: Using data sections %s based on selected sensors",
-                station_id,
-                self.data_sections,
+                f"NDBC Buoy {station_id}: Using data sections {self.data_sections} based on selected sensors"
             )
         else:
             self.data_sections: Final = data_sections or []
@@ -89,7 +88,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         # Track consecutive failures for better error reporting
         self._consecutive_failures = 0
-        self._max_consecutive_failures = 3
+        self._max_consecutive_failures = MAX_CONSECUTIVE_FAILURES
         # Track partially failed sensors
         self._failed_sensors: dict[str, int] = {}
 
@@ -131,18 +130,13 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                         )
                     else:
                         _LOGGER.warning(
-                            "%s %s: No data returned (attempt %d/%d)",
-                            source_type.capitalize(),
-                            self.station_id,
-                            self._consecutive_failures,
-                            self._max_consecutive_failures,
+                            f"{source_type.capitalize()} {self.station_id}: No data returned "
+                            f"(attempt {self._consecutive_failures}/{self._max_consecutive_failures})"
                         )
                         # If we have previous data, use it instead of failing completely
                         if self.data:
                             _LOGGER.info(
-                                "%s %s: Using cached data for this update",
-                                source_type.capitalize(),
-                                self.station_id,
+                                f"{source_type.capitalize()} {self.station_id}: Using cached data for this update"
                             )
                             return self.data
 
@@ -167,20 +161,13 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                             >= self._max_consecutive_failures
                         ):
                             _LOGGER.warning(
-                                "%s %s: Sensor '%s' has failed to return data %d times in a row",
-                                source_type.capitalize(),
-                                self.station_id,
-                                sensor,
-                                self._failed_sensors[sensor],
+                                f"{source_type.capitalize()} {self.station_id}: Sensor '{sensor}' has failed to return data "
+                                f"{self._failed_sensors[sensor]} times in a row"
                             )
                         else:
                             _LOGGER.debug(
-                                "%s %s: Sensor '%s' returned no data (attempt %d/%d)",
-                                source_type.capitalize(),
-                                self.station_id,
-                                sensor,
-                                self._failed_sensors[sensor],
-                                self._max_consecutive_failures,
+                                f"{source_type.capitalize()} {self.station_id}: Sensor '{sensor}' returned no data "
+                                f"(attempt {self._failed_sensors[sensor]}/{self._max_consecutive_failures})"
                             )
 
                 # Reset the consecutive failure counter since we got some data
@@ -197,11 +184,11 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._consecutive_failures += 1
 
             _LOGGER.error(
-                "%s %s: Timeout fetching data (attempt %d/%d)",
-                source_type.capitalize(),
-                self.station_id,
-                self._consecutive_failures,
-                self._max_consecutive_failures,
+                LogMessages.CONNECTION_TIMEOUT.format(
+                    source_type=source_type.capitalize(),
+                    source_id=self.station_id,
+                    operation="data fetch"
+                ) + f" (attempt {self._consecutive_failures}/{self._max_consecutive_failures})"
             )
 
             # Provide more detailed error after multiple consecutive timeouts
@@ -215,9 +202,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 # If we have previous data, use it instead of failing completely
                 if self.data:
                     _LOGGER.info(
-                        "%s %s: Using cached data for this update due to timeout",
-                        source_type.capitalize(),
-                        self.station_id,
+                        f"{source_type.capitalize()} {self.station_id}: Using cached data for this update due to timeout"
                     )
                     return self.data
 
@@ -230,12 +215,8 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             # For UpdateFailed exceptions, track failures but re-raise with the same message
             self._consecutive_failures += 1
             _LOGGER.error(
-                "%s %s: Update failed (attempt %d/%d): %s",
-                source_type.capitalize(),
-                self.station_id,
-                self._consecutive_failures,
-                self._max_consecutive_failures,
-                str(err),
+                f"{source_type.capitalize()} {self.station_id}: Update failed "
+                f"(attempt {self._consecutive_failures}/{self._max_consecutive_failures}): {err}"
             )
 
             # If we have previous data and haven't failed too many times, use cached data
@@ -244,9 +225,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 and self._consecutive_failures < self._max_consecutive_failures
             ):
                 _LOGGER.info(
-                    "%s %s: Using cached data for this update due to error",
-                    source_type.capitalize(),
-                    self.station_id,
+                    f"{source_type.capitalize()} {self.station_id}: Using cached data for this update due to error"
                 )
                 return self.data
 
@@ -267,7 +246,10 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 if api_error.help_url:
                     error_msg += f" See {api_error.help_url} for more information."
             else:
-                error_msg = f"{'NOAA Station' if self.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} {self.station_id}: {str(err)}"
+                error_msg = (
+                    f"{'NOAA Station' if self.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} "
+                    f"{self.station_id}: {err}"
+                )
 
             _LOGGER.error(error_msg)
 
@@ -277,9 +259,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 and self._consecutive_failures < self._max_consecutive_failures
             ):
                 _LOGGER.info(
-                    "%s %s: Using cached data for this update due to error",
-                    source_type.capitalize(),
-                    self.station_id,
+                    f"{source_type.capitalize()} {self.station_id}: Using cached data for this update due to error"
                 )
                 return self.data
 
@@ -290,13 +270,8 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._consecutive_failures += 1
 
             _LOGGER.error(
-                "%s %s: Unexpected error fetching data (attempt %d/%d): %s (%s)",
-                source_type.capitalize(),
-                self.station_id,
-                self._consecutive_failures,
-                self._max_consecutive_failures,
-                str(err),
-                type(err).__name__,
+                f"{source_type.capitalize()} {self.station_id}: Unexpected error fetching data "
+                f"(attempt {self._consecutive_failures}/{self._max_consecutive_failures}): {err} ({type(err).__name__})"
             )
 
             # If we have previous data and haven't failed too many times, use cached data
@@ -305,14 +280,12 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 and self._consecutive_failures < self._max_consecutive_failures
             ):
                 _LOGGER.info(
-                    "%s %s: Using cached data for this update due to error",
-                    source_type.capitalize(),
-                    self.station_id,
+                    f"{source_type.capitalize()} {self.station_id}: Using cached data for this update due to error"
                 )
                 return self.data
 
             raise UpdateFailed(
-                f"Error fetching data from {source_type} {self.station_id}: {str(err)}"
+                f"Error fetching data from {source_type} {self.station_id}: {err}"
             )
 
     def _get_missing_sensors(self, data: CoordinatorData) -> list[str]:
