@@ -31,18 +31,48 @@ from .utils import get_related_sensors, get_unit_for_sensor, is_part_of_composit
 _LOGGER: Final = logging.getLogger(__name__)
 
 
+def get_tide_icon(tide_factor: float, next_tide_type: str) -> str:
+    """
+    Get tide icon.
+
+    Logic:
+    - Low tide state (≤25%): Single wave icon
+    - High tide state (≥75%): Multiple waves icon
+    - Rising transition (25-75% toward high): Wave arrow up
+    - Falling transition (75-25% toward low): Wave arrow down
+
+    Args:
+        tide_factor: Current tide factor (0-100)
+        next_tide_type: Type of next tide ("High" or "Low")
+
+    Returns:
+        str: Material Design icon name
+    """
+    # Extreme states
+    if tide_factor <= LOW_TIDE_THRESHOLD:
+        return "mdi:wave"  # Low tide - single wave
+    elif tide_factor >= HIGH_TIDE_THRESHOLD:
+        return "mdi:waves"  # High tide - triple waves
+
+    # Transition states
+    elif next_tide_type == "High":
+        return "mdi:wave-arrow-up"  # Rising toward high tide
+    else:
+        return "mdi:wave-arrow-down"  # Falling toward low tide
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up NOAA Tides sensors based on a config entry.
-    
+
     Args:
         hass: The HomeAssistant instance
         entry: The ConfigEntry to set up
         async_add_entities: Callback to add entities
-        
+
     Raises:
         ConfigEntryNotReady: If sensor setup fails
     """
@@ -84,13 +114,17 @@ async def async_setup_entry(
         async_add_entities(entities)
         _LOGGER.debug(
             LogMessages.SENSORS_DISCOVERED.format(
-                source_type="NOAA Station" if coordinator.hub_type == const.HUB_TYPE_NOAA else "NDBC Buoy",
+                source_type="NOAA Station"
+                if coordinator.hub_type == const.HUB_TYPE_NOAA
+                else "NDBC Buoy",
                 source_id=coordinator.station_id,
-                sensor_count=len(entities)
+                sensor_count=len(entities),
             )
         )
     else:
-        error_msg = f"No sensors were set up for {coordinator.station_id}. Check configuration."
+        error_msg = (
+            f"No sensors were set up for {coordinator.station_id}. Check configuration."
+        )
         _LOGGER.error(error_msg)
         raise ConfigEntryNotReady(error_msg)
 
@@ -151,6 +185,30 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
             description, coordinator.unit_system, coordinator.hub_type, description.key
         )
 
+    @property
+    def icon(self) -> str | None:
+        """Return dynamic icon based on tide state for tide prediction sensors."""
+        # Only apply dynamic icons to tide prediction sensors
+        if self.entity_description.key != "tide_predictions":
+            return self.entity_description.icon
+
+        # Ensure we have coordinator data
+        if not self.coordinator.data:
+            return "mdi:waves"  # Safe fallback
+
+        # Get tide prediction data
+        tide_data = self.coordinator.data.get("tide_predictions")
+        if not tide_data or not isinstance(tide_data, dict):
+            return "mdi:waves"  # Safe fallback
+
+        # Extract attributes for icon determination
+        attributes = tide_data.get("attributes", {})
+        tide_factor = attributes.get("tide_factor", 50.0)
+        next_tide_type = attributes.get("next_tide_type", "High")
+
+        # Return appropriate icon
+        return get_tide_icon(tide_factor, next_tide_type)
+
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
@@ -168,7 +226,8 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
             if isinstance(sensor_data, dict):
                 # Handle dictionary format (common in newer code)
                 self._attr_native_value = sensor_data.get("state")
-                self._attr_extra_state_attributes = sensor_data.get("attributes", {})
+                self._attr_extra_state_attributes = sensor_data.get(
+                    "attributes", {})
             else:
                 # Handle object format with state/attributes properties
                 self._attr_native_value = sensor_data.state
@@ -184,7 +243,8 @@ class NoaaTidesSensor(CoordinatorEntity[NoaaTidesDataUpdateCoordinator], SensorE
                     SensorDeviceClass.SPEED,
                 ]:
                     try:
-                        self._attr_native_value = float(self._attr_native_value)
+                        self._attr_native_value = float(
+                            self._attr_native_value)
                     except (ValueError, TypeError):
                         _LOGGER.debug(
                             f"{'NOAA Station' if self.coordinator.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} "
