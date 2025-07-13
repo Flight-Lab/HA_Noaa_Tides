@@ -176,7 +176,7 @@ class NdbcApiClient(BaseApiClient):
                                 attributes["raw_value"] = str(original_value)
                                 attributes["unit"] = "hPa"
 
-                            # Temperature sensors: REMOVE manual conversion - let HA handle it
+                            # Temperature sensors: No manual conversion - let HA handle it
                             # Note: ATMP, WTMP, DEWP will use native Celsius values
 
                         # Add direction cardinal for direction measurements
