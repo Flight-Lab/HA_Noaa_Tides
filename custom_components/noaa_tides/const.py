@@ -64,14 +64,14 @@ DATA_SECTIONS: Final[dict[DataSectionType, str]] = {
     DATA_OCEAN_CURRENT: "Ocean Current Data",
 }
 
-# API Endpoints (using function builders instead of .format())
+# API Endpoints
 # NOAA API Endpoints
 NOAA_BASE_URL: Final = "https://api.tidesandcurrents.noaa.gov"
 NOAA_PRODUCTS_URL = get_noaa_products_url  # Function reference
 NOAA_SENSORS_URL = get_noaa_sensors_url    # Function reference
 NOAA_DATA_URL: Final = get_noaa_data_url()
 
-# NDBC API Endpoints  
+# NDBC API Endpoints
 NDBC_BASE_URL: Final = "https://www.ndbc.noaa.gov/data/realtime2"
 NDBC_METEO_URL = get_ndbc_meteo_url      # Function reference
 NDBC_SPEC_URL = get_ndbc_spec_url        # Function reference
