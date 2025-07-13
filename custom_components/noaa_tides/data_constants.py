@@ -3,7 +3,7 @@
 from typing import Final
 
 
-# Non-temperature unit conversion factors (still needed for manual conversion)
+# Unit conversion factors - excluding temperature
 METERS_TO_FEET_FACTOR: Final = 3.28084
 MS_TO_MPH_FACTOR: Final = 2.23694
 HPA_TO_INHG_FACTOR: Final = 0.02953
