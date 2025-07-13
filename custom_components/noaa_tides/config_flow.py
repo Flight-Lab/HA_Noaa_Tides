@@ -13,6 +13,7 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import config_validation as cv
 
 from . import const
+from .data_constants import LogMessages
 from .types import ConfigFlowData
 from .utils import (
     discover_ndbc_sensors,
@@ -130,9 +131,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
             if not self._available_sensors:
                 self._available_sensors = await self._discover_sensors()
 
-            _LOGGER.debug(
-                "Available sensors for selection: %s", self._available_sensors
-            )
+            _LOGGER.debug(f"Available sensors for selection: {self._available_sensors}")
 
             if not self._available_sensors:
                 errors["base"] = "no_sensors"
@@ -164,7 +163,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                 errors=errors,
             )
         except Exception as ex:
-            _LOGGER.exception("Unexpected error in sensor selection: %s", ex)
+            _LOGGER.exception(f"Unexpected error in sensor selection: {ex}")
             errors["base"] = "unknown"
             return self.async_show_form(
                 step_id="sensor_select",
