@@ -14,7 +14,7 @@
                     "sensors": "Sensors to Enable",
                     "timezone": "Timezone",
                     "unit_system": "Unit System",
-                    "update_interval": "Update Interval (60-3600 seconds)",
+                    "update_interval": "Update Interval (60-3600 seconds)"
                 },
             },
         },
@@ -22,11 +22,11 @@
             "invalid_station": "Station/Buoy ID not found. Please verify the ID is correct.",
             "no_sensors": "No available sensors found for this station/buoy",
             "unknown": "An unexpected error occurred",
-            "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+            "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]"
         },
         "abort": {
             "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
-            "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+            "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
         },
     },
     "options": {
@@ -34,7 +34,7 @@
             "init": {
                 "title": "NOAA Tides Options",
                 "description": "Update integration settings",
-                "data": {"update_interval": "Update Interval (60-3600 seconds)"},
+                "data": {"update_interval": "Update Interval (60-3600 seconds)"}
             }
         }
     },
@@ -51,9 +51,9 @@
             "options": {
                 "gmt": "GMT",
                 "lst": "Local Standard Time",
-                "lst_ldt": "Local Standard/Daylight Time",
+                "lst_ldt": "Local Standard/Daylight Time"
             }
         },
-        "unit_system": {"options": {"metric": "Metric", "imperial": "Imperial"}},
+        "unit_system": {"options": {"metric": "Metric", "imperial": "Imperial"}}
     },
 }
