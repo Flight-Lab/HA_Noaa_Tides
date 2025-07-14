@@ -31,7 +31,7 @@ NOAA_SENSOR_TYPES: Final[dict[str, NoaaTidesSensorEntityDescription]] = {
     "tide_predictions": NoaaTidesSensorEntityDescription(
         key="tide_predictions",
         name="Tide State",
-        icon="mdi:waves",
+        # Icon determined dynamically by sensor's icon property
         is_ndbc=False,
     ),
     "currents_speed": NoaaTidesSensorEntityDescription(
