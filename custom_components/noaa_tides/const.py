@@ -20,9 +20,9 @@ from .types import DataSectionType, TimezoneType, UnitSystemType
 DOMAIN: Final = "noaa_tides"
 PLATFORMS: Final[list[Platform]] = [Platform.SENSOR]
 
-# Hub Types
-HUB_TYPE_NOAA: Final = "noaa_station"
-HUB_TYPE_NDBC: Final = "ndbc_buoy"
+# Station Types
+STATION_TYPE_NOAA: Final = "noaa_station"
+STATION_TYPE_NDBC: Final = "ndbc_buoy"
 
 # Configuration Constants
 CONF_STATION_ID: Final = "station_id"
@@ -31,7 +31,7 @@ CONF_TIMEZONE: Final = "timezone"
 CONF_UNIT_SYSTEM: Final = "unit_system"
 CONF_UPDATE_INTERVAL: Final = "update_interval"
 CONF_DATA_SECTIONS: Final = "data_sections"
-CONF_HUB_TYPE: Final = "hub_type"
+CONF_STATION_TYPE: Final = "station_type"
 
 # Timezone Options
 TIMEZONE_GMT: Final = "gmt"
