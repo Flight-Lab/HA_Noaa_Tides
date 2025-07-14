@@ -4,7 +4,7 @@
             "user": {
                 "title": "NOAA Tides Setup",
                 "description": "Enter your station or buoy ID. The system will automatically detect if it's a NOAA station or NDBC buoy.\n\n**Find station IDs:**\n• NOAA stations: {noaa_help}\n• NDBC buoys: {ndbc_help}",
-                "data": {"station_id": "Station/Buoy ID"},
+                "data": {"station_id": "Station/Buoy ID"}
             },
             "configure": {
                 "title": "Configure {detected_type}",
