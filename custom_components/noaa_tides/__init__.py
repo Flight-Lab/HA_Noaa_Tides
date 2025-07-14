@@ -33,7 +33,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Create coordinator with proper type hints
     coordinator = NoaaTidesDataUpdateCoordinator(
         hass,
-        hub_type=entry.data[const.CONF_HUB_TYPE],
+        station_type=entry.data[const.CONF_STATION_TYPE],
         station_id=entry.data.get(const.CONF_STATION_ID)
         or entry.data.get(const.CONF_BUOY_ID),
         selected_sensors=entry.data.get("sensors", []),
@@ -59,12 +59,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         name=entry.data.get("name", ""),
         manufacturer=(
             "The National Oceanic & Atmospheric Administration"
-            if entry.data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA
+            if entry.data[const.CONF_STATION_TYPE] == const.STATION_TYPE_NOAA
             else "The National Data Buoy Center"
         ),
         model=(
             f"NOAA Station {coordinator.station_id}"
-            if entry.data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA
+            if entry.data[const.CONF_STATION_TYPE] == const.STATION_TYPE_NOAA
             else f"NDBC Buoy {coordinator.station_id}"
         ),
         entry_type=DeviceEntryType.SERVICE,
@@ -79,7 +79,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Remove the config entry from domain data if initial refresh failed
         hass.data[const.DOMAIN].pop(entry.entry_id)
         source_type = (
-            "NOAA station" if entry.data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA 
+            "NOAA station" if entry.data[const.CONF_STATION_TYPE] == const.STATION_TYPE_NOAA 
             else "NDBC buoy"
         )
         raise ConfigEntryNotReady(
