@@ -64,17 +64,17 @@ DATA_SECTIONS: Final[dict[DataSectionType, str]] = {
     DATA_OCEAN_CURRENT: "Ocean Current Data",
 }
 
-# API Endpoints
+# API Endpoints (using function builders instead of .format())
 # NOAA API Endpoints
 NOAA_BASE_URL: Final = "https://api.tidesandcurrents.noaa.gov"
 NOAA_PRODUCTS_URL = get_noaa_products_url  # Function reference
-NOAA_SENSORS_URL = get_noaa_sensors_url    # Function reference
+NOAA_SENSORS_URL = get_noaa_sensors_url  # Function reference
 NOAA_DATA_URL: Final = get_noaa_data_url()
 
 # NDBC API Endpoints
 NDBC_BASE_URL: Final = "https://www.ndbc.noaa.gov/data/realtime2"
-NDBC_METEO_URL = get_ndbc_meteo_url      # Function reference
-NDBC_SPEC_URL = get_ndbc_spec_url        # Function reference
+NDBC_METEO_URL = get_ndbc_meteo_url  # Function reference
+NDBC_SPEC_URL = get_ndbc_spec_url  # Function reference
 NDBC_CURRENT_URL = get_ndbc_current_url  # Function reference
 
 # Default Values
@@ -84,6 +84,10 @@ DEFAULT_TIMEZONE: Final = TIMEZONE_LST_LDT
 DEFAULT_UNIT_SYSTEM: Final = UNIT_IMPERIAL
 DEFAULT_UPDATE_INTERVAL: Final = 300  # 5 minutes in seconds
 DEFAULT_TIMEOUT: Final = 30  # seconds
+
+# Tide Icon Display Thresholds
+LOW_TIDE_ICON_THRESHOLD: Final = 15.0  # Below this = low tide state icon
+HIGH_TIDE_ICON_THRESHOLD: Final = 85.0  # Above this = high tide state icon
 
 # Error Messages
 ERROR_INVALID_STATION: Final = "Invalid station ID provided"
@@ -141,7 +145,8 @@ SPEC_WAVE_SENSORS: Final[list[str]] = [
     "spec_wave_mwd",
 ]
 
-OCEAN_CURRENT_SENSORS: Final = ["current_depth", "current_drct", "current_spdd"]
+OCEAN_CURRENT_SENSORS: Final = [
+    "current_depth", "current_drct", "current_spdd"]
 
 # Mapping for which section contains which sensors
 SENSOR_SECTION_MAP: Final[dict[str, list[str]]] = {
@@ -154,9 +159,9 @@ SENSOR_SECTION_MAP: Final[dict[str, list[str]]] = {
 # Prioritize spectral wave data over meteorological data for better accuracy
 OVERLAPPING_SENSORS: Final[dict[str, str]] = {
     # Wave height
-    "meteo_wvht": "spec_wave_wvht",  # Prefer spectral wave height over meteorological
-    # Wave period
-    "meteo_apd": "spec_wave_apd",  # Prefer spectral average wave period over meteorological
-    # Wave direction
-    "meteo_mwd": "spec_wave_mwd",  # Prefer spectral mean wave direction over meteorological
+    "meteo_wvht": "spec_wave_wvht",  # Prefer over meteorological
+    # Average wave period
+    "meteo_apd": "spec_wave_apd",  # Prefer over meteorological
+    # Mean wave direction
+    "meteo_mwd": "spec_wave_mwd",  # Prefer spectral over meteorological
 }
