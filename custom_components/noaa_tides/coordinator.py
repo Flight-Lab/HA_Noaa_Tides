@@ -32,7 +32,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
     def __init__(
         self,
         hass: HomeAssistant,
-        hub_type: Literal[const.HUB_TYPE_NOAA, const.HUB_TYPE_NDBC],
+        station_type: Literal[const.STATION_TYPE_NOAA, const.STATION_TYPE_NDBC],
         station_id: str,
         selected_sensors: list[str],
         timezone: str = const.DEFAULT_TIMEZONE,
@@ -44,7 +44,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         Args:
             hass: The Home Assistant instance
-            hub_type: The type of hub (NOAA or NDBC)
+            station_type: The type of station (NOAA or NDBC)
             station_id: The station or buoy ID
             selected_sensors: List of selected sensor types
             timezone: The timezone setting
@@ -53,13 +53,13 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             data_sections: Selected data sections for NDBC
         """
         self.station_id: Final = station_id
-        self.hub_type: Final = hub_type
+        self.station_type: Final = station_type
         self.selected_sensors: Final = selected_sensors
         self.timezone: Final = timezone
         self.unit_system: Final = unit_system
 
         # For NDBC, determine required data sections based on selected sensors
-        if hub_type == const.HUB_TYPE_NDBC:
+        if station_type == const.STATION_TYPE_NDBC:
             self.data_sections: Final = determine_required_data_sections(
                 selected_sensors
             )
@@ -70,7 +70,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self.data_sections: Final = data_sections or []
 
         # Initialize the appropriate API client
-        if hub_type == const.HUB_TYPE_NOAA:
+        if station_type == const.STATION_TYPE_NOAA:
             self.api_client: Final = NoaaApiClient(
                 hass, station_id, timezone, unit_system
             )
@@ -108,7 +108,7 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             UpdateFailed: If there's an error fetching data after retries
         """
         source_type = (
-            "NOAA station" if self.hub_type == const.HUB_TYPE_NOAA else "NDBC buoy"
+            "NOAA station" if self.station_type == const.STATION_TYPE_NOAA else "NDBC buoy"
         )
 
         try:
@@ -240,14 +240,14 @@ class NoaaTidesDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             # Format a helpful error message
             if api_error and isinstance(api_error, ApiError):
                 error_msg = (
-                    f"{'NOAA Station' if self.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} "
+                    f"{'NOAA Station' if self.station_type == const.STATION_TYPE_NOAA else 'NDBC Buoy'} "
                     f"{self.station_id}: {api_error.message} (Error code: {api_error.code})"
                 )
                 if api_error.help_url:
                     error_msg += f" See {api_error.help_url} for more information."
             else:
                 error_msg = (
-                    f"{'NOAA Station' if self.hub_type == const.HUB_TYPE_NOAA else 'NDBC Buoy'} "
+                    f"{'NOAA Station' if self.station_type == const.STATION_TYPE_NOAA else 'NDBC Buoy'} "
                     f"{self.station_id}: {err}"
                 )
 

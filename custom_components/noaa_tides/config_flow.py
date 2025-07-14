@@ -33,7 +33,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
         self._data: ConfigFlowData = ConfigFlowData(
             name="",
             sensors=[],
-            hub_type="",
+            station_type="",
             timezone=const.DEFAULT_TIMEZONE,
             unit_system=const.DEFAULT_UNIT_SYSTEM,
             update_interval=const.DEFAULT_UPDATE_INTERVAL,
@@ -63,11 +63,11 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                     )
                 else:
                     # Successfully detected - store the data and continue
-                    self._data[const.CONF_HUB_TYPE] = detected_type
+                    self._data[const.CONF_STATION_TYPE] = detected_type
                     self._detected_station_id = station_id
 
                     # Set the appropriate ID field based on detected type
-                    if detected_type == const.HUB_TYPE_NOAA:
+                    if detected_type == const.STATION_TYPE_NOAA:
                         self._data[const.CONF_STATION_ID] = station_id
                         _LOGGER.info(
                             f"Auto-detected NOAA Station: {station_id}")
@@ -104,7 +104,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                 _LOGGER.debug(
                     f"Station {station_id} identified as NOAA station ({len(noaa_sensors)} sensors)"
                 )
-                return const.HUB_TYPE_NOAA
+                return const.STATION_TYPE_NOAA
         except Exception as err:
             _LOGGER.debug(
                 f"NOAA sensor discovery failed for {station_id}: {err}")
@@ -118,7 +118,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                 _LOGGER.debug(
                     f"Station {station_id} identified as NDBC buoy ({len(ndbc_sensors)} sensors)"
                 )
-                return const.HUB_TYPE_NDBC
+                return const.STATION_TYPE_NDBC
         except Exception as err:
             _LOGGER.debug(
                 f"NDBC sensor discovery failed for {station_id}: {err}")
@@ -147,7 +147,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                     errors=errors,
                     description_placeholders={
                         "detected_type": "NOAA Station"
-                        if self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA
+                        if self._data[const.CONF_STATION_TYPE] == const.STATION_TYPE_NOAA
                         else "NDBC Buoy",
                         "station_id": self._detected_station_id,
                     },
@@ -160,7 +160,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                 errors=errors,
                 description_placeholders={
                     "detected_type": "NOAA Station"
-                    if self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA
+                    if self._data[const.CONF_STATION_TYPE] == const.STATION_TYPE_NOAA
                     else "NDBC Buoy",
                     "station_id": self._detected_station_id,
                 },
@@ -178,7 +178,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                 )
 
         # Determine default name based on detected type
-        is_noaa = self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA
+        is_noaa = self._data[const.CONF_STATION_TYPE] == const.STATION_TYPE_NOAA
         default_name = (
             f"NOAA Station {self._detected_station_id}"
             if is_noaa
@@ -215,7 +215,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
 
     async def _discover_sensors(self) -> dict[str, str]:
         """Discover available sensors based on detected type."""
-        if self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA:
+        if self._data[const.CONF_STATION_TYPE] == const.STATION_TYPE_NOAA:
             return await discover_noaa_sensors(
                 self.hass, self._data[const.CONF_STATION_ID]
             )

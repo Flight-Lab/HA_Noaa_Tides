@@ -32,7 +32,7 @@ from .data_constants import (
     LogMessages,
 )
 from .types import (
-    HubType,
+    StationType,
     NoaaProductResponse,
     NoaaSensorResponse,
     NoaaTidesSensorEntityDescription,
@@ -52,7 +52,7 @@ async def validate_noaa_station(hass: HomeAssistant, station_id: str) -> bool:
         bool: True if station is valid, False otherwise
 
     """
-    return await validate_data_source(hass, station_id, const.HUB_TYPE_NOAA)
+    return await validate_data_source(hass, station_id, const.STATION_TYPE_NOAA)
 
 
 async def validate_ndbc_buoy(
@@ -72,7 +72,7 @@ async def validate_ndbc_buoy(
     # Always check all sections regardless of what was passed
     all_sections = list(const.DATA_SECTIONS)
     _LOGGER.debug(f"NDBC Buoy {buoy_id}: Validating buoy ID with all data sections")
-    return await validate_data_source(hass, buoy_id, const.HUB_TYPE_NDBC, all_sections)
+    return await validate_data_source(hass, buoy_id, const.STATION_TYPE_NDBC, all_sections)
 
 
 def _deduplicate_overlapping_sensors(sensors: dict[str, str]) -> dict[str, str]:
@@ -467,17 +467,17 @@ def degrees_to_cardinal(degrees: float | None) -> str | None:
 def get_unit_for_sensor(
     sensor_description: NoaaTidesSensorEntityDescription,
     unit_system: str,
-    hub_type: str,
+    station_type: str,
     sensor_id: str,
 ) -> str | None:
-    """Get the appropriate unit for a sensor based on unit system and hub type.
+    """Get the appropriate unit for a sensor based on unit system and station type.
 
     Note: Temperature sensors no longer use this logic as HA handles conversion automatically.
 
     Args:
         sensor_description: The sensor entity description
         unit_system: The chosen unit system (UNIT_METRIC or UNIT_IMPERIAL)
-        hub_type: The hub type (HUB_TYPE_NOAA or HUB_TYPE_NDBC)
+        station_type: The station type (STATION_TYPE_NOAA or STATION_TYPE_NDBC)
         sensor_id: The sensor identifier
 
     Returns:
