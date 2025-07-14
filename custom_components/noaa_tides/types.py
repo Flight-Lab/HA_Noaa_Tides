@@ -8,8 +8,8 @@ from typing import Any, Literal, NotRequired
 
 from homeassistant.components.sensor import SensorEntityDescription
 
-# Hub Types
-HubType = Literal["noaa_station", "ndbc_buoy"]
+# Station Types
+StationType = Literal["noaa_station", "ndbc_buoy"]
 
 # Timezone Options
 TimezoneType = Literal["gmt", "lst", "lst_ldt"]
@@ -191,7 +191,7 @@ class ConfigFlowData(dict[str, Any]):
 
     name: str
     sensors: list[str]
-    hub_type: str
+    station_type: str
     station_id: NotRequired[str]  # NOAA stations
     buoy_id: NotRequired[str]  # NDBC buoys
     timezone: str
