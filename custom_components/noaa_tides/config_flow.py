@@ -1,4 +1,4 @@
-"""Config flow for NOAA Tides integration with auto-detection."""
+"""Config flow for NOAA Tides integration."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
-    """Handle a config flow for NOAA Tides integration with auto-detection."""
+    """Handle a config flow for NOAA Tides integration."""
 
     VERSION: Final = 1
 
@@ -44,7 +44,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step - station ID input with auto-detection."""
+        """Handle the initial step - station ID."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -132,7 +132,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
     async def async_step_configure(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the configuration step with all options including sensor selection."""
+        """Handle the configuration step."""
         errors: dict[str, str] = {}
 
         # Discover sensors if we haven't already
@@ -214,7 +214,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
         )
 
     async def _discover_sensors(self) -> dict[str, str]:
-        """Discover available sensors based on detected hub type and configuration."""
+        """Discover available sensors based on detected type."""
         if self._data[const.CONF_HUB_TYPE] == const.HUB_TYPE_NOAA:
             return await discover_noaa_sensors(
                 self.hass, self._data[const.CONF_STATION_ID]
