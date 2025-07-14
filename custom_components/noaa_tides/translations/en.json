@@ -1,59 +1,77 @@
 {
-    "config": {
-        "step": {
-            "user": {
-                "title": "NOAA Tides Setup",
-                "description": "Enter your station or buoy ID. The system will automatically detect if it's a NOAA station or NDBC buoy.\n\n**Find station IDs:**\n• NOAA stations: {noaa_help}\n• NDBC buoys: {ndbc_help}",
-                "data": {"station_id": "Station/Buoy ID"}
-            },
-            "configure": {
-                "title": "Configure {detected_type}",
-                "description": "Successfully detected **{detected_type} {station_id}** with **{sensor_count} available sensors**. Configure your settings and select which sensors to enable.",
-                "data": {
-                    "name": "Name",
-                    "sensors": "Sensors to Enable",
-                    "timezone": "Timezone",
-                    "unit_system": "Unit System",
-                    "update_interval": "Update Interval (60-3600 seconds)"
-                },
-            },
-        },
-        "error": {
-            "invalid_station": "Station/Buoy ID not found. Please verify the ID is correct.",
-            "no_sensors": "No available sensors found for this station/buoy",
-            "unknown": "An unexpected error occurred",
-            "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]"
-        },
-        "abort": {
-            "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
-            "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
-        },
-    },
-    "options": {
-        "step": {
-            "init": {
-                "title": "NOAA Tides Options",
-                "description": "Update integration settings",
-                "data": {"update_interval": "Update Interval (60-3600 seconds)"}
-            }
+  "config": {
+    "step": {
+      "user": {
+        "title": "NOAA Tides Setup",
+        "description": "Enter your station or buoy ID. The system will automatically detect if it's a NOAA station or NDBC buoy.\n\n**Find station IDs:**\n• NOAA stations: {noaa_help}\n• NDBC buoys: {ndbc_help}",
+        "data": {
+          "station_id": "Station/Buoy ID"
         }
-    },
-    "entity": {
-        "sensor": {
-            "tide_state": {"state": {"rising": "Rising", "falling": "Falling"}},
-            "currents_predictions": {
-                "state": {"ebb": "Ebb", "flood": "Flood", "slack": "Slack"}
-            },
+      },
+      "configure": {
+        "title": "Configure {detected_type}",
+        "description": "Successfully detected **{detected_type} {station_id}** with **{sensor_count} available sensors**. Configure your settings and select which sensors to enable.",
+        "data": {
+          "name": "Name",
+          "sensors": "Sensors to Enable",
+          "timezone": "Timezone",
+          "unit_system": "Unit System",
+          "update_interval": "Update Interval (60-3600 seconds)"
         }
+      }
     },
-    "selector": {
-        "timezone": {
-            "options": {
-                "gmt": "GMT",
-                "lst": "Local Standard Time",
-                "lst_ldt": "Local Standard/Daylight Time"
-            }
-        },
-        "unit_system": {"options": {"metric": "Metric", "imperial": "Imperial"}}
+    "error": {
+      "invalid_station": "Station/Buoy ID not found. Please verify the ID is correct.",
+      "no_sensors": "No available sensors found for this station/buoy",
+      "unknown": "An unexpected error occurred",
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]"
     },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "NOAA Tides Options",
+        "description": "Update integration settings",
+        "data": {
+          "update_interval": "Update Interval (60-3600 seconds)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "tide_state": {
+        "state": {
+          "rising": "Rising",
+          "falling": "Falling"
+        }
+      },
+      "currents_predictions": {
+        "state": {
+          "ebb": "Ebb",
+          "flood": "Flood",
+          "slack": "Slack"
+        }
+      }
+    }
+  },
+  "selector": {
+    "timezone": {
+      "options": {
+        "gmt": "GMT",
+        "lst": "Local Standard Time",
+        "lst_ldt": "Local Standard/Daylight Time"
+      }
+    },
+    "unit_system": {
+      "options": {
+        "metric": "Metric",
+        "imperial": "Imperial"
+      }
+    }
+  }
 }
