@@ -14,6 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import const
+from .const import LOW_TIDE_THRESHOLD, HIGH_TIDE_THRESHOLD
 from .coordinator import NoaaTidesDataUpdateCoordinator
 from .data_constants import LogMessages
 from .sensors import NDBC_SENSOR_TYPES, NOAA_SENSOR_TYPES
