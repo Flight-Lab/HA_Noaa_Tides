@@ -89,15 +89,6 @@ DEFAULT_TIMEOUT: Final = 30  # seconds
 LOW_TIDE_THRESHOLD: Final = 15.0  # Below this = low tide state icon
 HIGH_TIDE_THRESHOLD: Final = 85.0  # Above this = high tide state icon
 
-# Error Messages
-ERROR_INVALID_STATION: Final = "Invalid station ID provided"
-ERROR_INVALID_BUOY: Final = "Invalid buoy ID provided"
-ERROR_NO_DATA_SECTIONS: Final = "At least one data section must be selected"
-ERROR_INVALID_TIMEZONE: Final = "Invalid timezone selection"
-ERROR_INVALID_UNIT_SYSTEM: Final = "Invalid unit system selection"
-ERROR_NO_SENSORS: Final = "No available sensors found for this station/buoy"
-ERROR_UNKNOWN: Final = "An unexpected error occurred"
-
 # Attribute Constants (moved from multiple separate sections)
 ATTR_TIDE_STATE: Final = "tide_state"
 ATTR_NEXT_TIDE_TYPE: Final = "next_tide_type"
