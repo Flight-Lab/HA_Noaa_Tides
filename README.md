@@ -6,8 +6,9 @@
 
 A custom component for Home Assistant that provides real-time tidal, current, and environmental data from NOAA's Center for Operational Oceanographic Products and Services (CO-OPS) API and the National Data Buoy Center (NDBC) API. This component enhances and extends the functionality of the [legacy NOAA Tides core component](https://www.home-assistant.io/integrations/noaa_tides/), offering UI configurability, automatic sensor detection, and enhanced data handling.
 
-> [!WARNING]  
-> Sensor names and attributes subject to change before v 1.0.0 release. Feedback and suggestions are greatly appreciated.
+> [!IMPORTANT]  
+> **Pre-1.0 Notice**: Sensor entity names and some attributes may change before v1.0.0. 
+> This could affect your automations and dashboards.
 
 ## Features
 
@@ -103,7 +104,7 @@ The NDBC and it's partners operate nearly 1000 active buoys and coastal stations
 - **Tide Factor**: Sinusoidal representation of tide level (0-100%) that follows the natural curve of tidal change, with slower changes near high/low tides and faster changes at mid-tide levels.
 - **Tide Percentage**: Linear representation of tide progress (0-100%) that moves at a constant rate between tides, making it perfect for tide clocks and calculating exact timing of tidal events.
 
-### Current Predictions (expiremental)
+### Current Predictions
 - **Current State**: Shows ebb, flood, or slack water
 - **Direction**: Compass bearing of water movement
 - **Speed**: Current velocity
