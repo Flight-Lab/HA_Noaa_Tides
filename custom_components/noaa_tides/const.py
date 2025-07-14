@@ -86,8 +86,8 @@ DEFAULT_UPDATE_INTERVAL: Final = 300  # 5 minutes in seconds
 DEFAULT_TIMEOUT: Final = 30  # seconds
 
 # Tide Icon Display Thresholds
-LOW_TIDE_ICON_THRESHOLD: Final = 15.0  # Below this = low tide state icon
-HIGH_TIDE_ICON_THRESHOLD: Final = 85.0  # Above this = high tide state icon
+LOW_TIDE_THRESHOLD: Final = 15.0  # Below this = low tide state icon
+HIGH_TIDE_THRESHOLD: Final = 85.0  # Above this = high tide state icon
 
 # Error Messages
 ERROR_INVALID_STATION: Final = "Invalid station ID provided"
