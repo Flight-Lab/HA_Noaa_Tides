@@ -52,22 +52,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register device immediately to ensure it exists before entity creation
     device_registry = async_get(hass)
 
-    # Create device entry with proper identifiers
-    device_registry.async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(const.DOMAIN, entry.entry_id)},
-        name=entry.data.get("name", ""),
-        manufacturer=(
+    # Build device info with proper identifiers
+    device_info = {
+        "identifiers": {(const.DOMAIN, entry.entry_id)},
+        "name": entry.data.get("name", ""),
+        "manufacturer": (
             "The National Oceanic & Atmospheric Administration"
             if entry.data[const.CONF_STATION_TYPE] == const.STATION_TYPE_NOAA
             else "The National Data Buoy Center"
         ),
-        model=(
+        "model": (
             f"NOAA Station {coordinator.station_id}"
             if entry.data[const.CONF_STATION_TYPE] == const.STATION_TYPE_NOAA
             else f"NDBC Buoy {coordinator.station_id}"
         ),
-        entry_type=DeviceEntryType.SERVICE,
+        "entry_type": DeviceEntryType.SERVICE,
+    }
+
+    # Add configuration URL based on station type
+    if entry.data[const.CONF_STATION_TYPE] == const.STATION_TYPE_NOAA:
+        device_info["configuration_url"] = const.NOAA_STATION_PAGE_URL.format(
+            station_id=coordinator.station_id
+        )
+    else:
+        device_info["configuration_url"] = const.NDBC_STATION_PAGE_URL.format(
+            station_id=coordinator.station_id
+        )
+
+    # Create device entry with device info
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        **device_info
     )
 
     # Set up platforms first so entities are ready for the data
