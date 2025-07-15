@@ -156,3 +156,11 @@ OVERLAPPING_SENSORS: Final[dict[str, str]] = {
     # Mean wave direction
     "meteo_mwd": "spec_wave_mwd",  # Prefer spectral over meteorological
 }
+
+# Map URLs for finding station/buoy IDs during configuration
+NOAA_STATION_MAP_URL: Final = "https://tidesandcurrents.noaa.gov/map/"
+NDBC_STATION_MAP_URL: Final = "https://www.ndbc.noaa.gov/obs.shtml"
+
+# Configuration URL templates for station pages  
+NOAA_STATION_PAGE_URL: Final = "https://tidesandcurrents.noaa.gov/stationhome.html?id={station_id}"
+NDBC_STATION_PAGE_URL: Final = "https://www.ndbc.noaa.gov/station_page.php?station={station_id}"
