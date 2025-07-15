@@ -46,16 +46,16 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
     ) -> FlowResult:
         """Handle the initial step - station ID."""
         errors: dict[str, str] = {}
-
+    
         if user_input is not None:
             station_id = user_input.get("station_id", "").strip().upper()
-
+    
             if not station_id:
                 errors["station_id"] = "Station ID cannot be empty"
             else:
                 # Try to auto-detect the station type
                 detected_type = await self._auto_detect_station_type(station_id)
-
+    
                 if detected_type is None:
                     # Neither NOAA nor NDBC recognized this ID
                     errors["station_id"] = (
@@ -65,7 +65,7 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                     # Successfully detected - store the data and continue
                     self._data[const.CONF_STATION_TYPE] = detected_type
                     self._detected_station_id = station_id
-
+    
                     # Set the appropriate ID field based on detected type
                     if detected_type == const.STATION_TYPE_NOAA:
                         self._data[const.CONF_STATION_ID] = station_id
@@ -76,9 +76,9 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
                         self._data[const.CONF_DATA_SECTIONS] = list(
                             const.DATA_SECTIONS)
                         _LOGGER.info(f"Auto-detected NDBC Buoy: {station_id}")
-
+    
                     return await self.async_step_configure()
-
+    
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
@@ -88,8 +88,8 @@ class NoaaTidesConfigFlow(config_entries.ConfigFlow, domain=const.DOMAIN):
             ),
             errors=errors,
             description_placeholders={
-                "noaa_help": "Find NOAA stations at https://tidesandcurrents.noaa.gov/map/",
-                "ndbc_help": "Find NDBC buoys at https://www.ndbc.noaa.gov/obs.shtml",
+                "noaa_help": const.NOAA_STATION_MAP_URL,
+                "ndbc_help": const.NDBC_STATION_MAP_URL,
             },
         )
 
